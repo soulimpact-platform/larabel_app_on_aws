@@ -1,0 +1,34 @@
+[
+  {
+    "name": "${container_name}",
+    "image": "${image}",
+    "essential": true,
+
+    "//command": "--isolated は cache_locks テーブルを必要とするため初回は付けられない。テーブル作成後に追加すると多重実行を防げる",
+    "command": ["php", "artisan", "migrate", "--force"],
+
+    "environment": [
+      { "name": "APP_ENV", "value": "production" },
+      { "name": "LOG_CHANNEL", "value": "stderr" },
+      { "name": "DB_CONNECTION", "value": "mysql" },
+      { "name": "DB_HOST", "value": "${db_host}" },
+      { "name": "DB_PORT", "value": "${db_port}" }
+    ],
+
+    "//secrets": "値はタスク起動時にSSMから解決される。タスク定義にもCIにも平文が現れない",
+    "secrets": [
+      { "name": "DB_DATABASE", "valueFrom": "${ssm_rds_prefix}/db_name" },
+      { "name": "DB_USERNAME", "valueFrom": "${ssm_rds_prefix}/username" },
+      { "name": "DB_PASSWORD", "valueFrom": "${ssm_rds_prefix}/password" }
+    ],
+
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "${log_group}",
+        "awslogs-region": "${region}",
+        "awslogs-stream-prefix": "migrate"
+      }
+    }
+  }
+]

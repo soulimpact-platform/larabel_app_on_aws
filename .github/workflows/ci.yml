@@ -26,6 +26,10 @@ permissions:
 env:
   AWS_REGION: ap-northeast-1
   ECR_REPOSITORY: larabel-app-prod-app
+  # migrate実行に必要な値（クラスタ名・タスク定義・コンテナ名・ロググループ・
+  # ネットワーク構成）はすべてこのSSMパラメータにJSONで入っている。
+  # ワークフローがECS側について知る固定値はこれだけ
+  ECS_CONFIG_PARAM: /larabel-app/prod/ecs/migrate
 
 jobs:
   ###########################################################################
@@ -37,6 +41,12 @@ jobs:
   build:
     name: Build and push image
     runs-on: ubuntu-latest
+
+    # 本番環境向けの設定（AWS_DEPLOY_ROLE_ARN）はこのEnvironmentに紐づく。
+    # 注意: environmentを指定するとOIDCのsubクレームが
+    #   repo:<org>/<repo>:environment:app-prod
+    # に変わる。信頼ポリシー(allowed_subjects)も同じ値にしておくこと。
+    environment: app-prod
 
     outputs:
       image_uri: ${{ steps.meta.outputs.image_uri }}
@@ -93,12 +103,153 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   ###########################################################################
+  # DBマイグレーション（承認制）
+  #
+  # buildが終わるとこのジョブは保留状態で停止し、実行ページに
+  # 「Review deployments」ボタンが出る。承認すれば実行、
+  # 承認しなければ保留のまま（タイムアウトまで待機）。
+  #
+  # 実行前ではなくbuildの結果を見てから判断できるのが利点。
+  #
+  # 注意: 却下(Reject)は「スキップ」ではなく「失敗」として扱われる。
+  # 後続にdeployを足す際は、却下でdeployも止まる点に留意すること。
+  ###########################################################################
+  migrate:
+    name: Run database migration
+    needs: build
+    runs-on: ubuntu-latest
+
+    # 承認ゲート用。app-prod とは別環境にすることで、
+    # 通常のビルドには承認を要求せずにmigrateだけ止められる
+    environment: app-prod-migrate
+
+    steps:
+      - name: AWSへOIDCで認証
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # クラスタ名・タスク定義・ネットワーク構成などをまとめて取得する。
+      # これ以降のステップはワークフロー内に値をハードコードしない
+      - name: 実行パラメータを取得
+        id: cfg
+        run: |
+          set -euo pipefail
+
+          CFG=$(aws ssm get-parameter \
+            --name "$ECS_CONFIG_PARAM" \
+            --query Parameter.Value --output text)
+
+          {
+            echo "cluster=$(jq -r .cluster <<<"$CFG")"
+            echo "family=$(jq -r .taskDefinitionFamily <<<"$CFG")"
+            echo "container=$(jq -r .containerName <<<"$CFG")"
+            echo "log_group=$(jq -r .logGroup <<<"$CFG")"
+            echo "network=$(jq -c .networkConfiguration <<<"$CFG")"
+          } >> "$GITHUB_OUTPUT"
+
+      # run-task では image を上書きできないため、
+      # buildでpushしたイメージを指す新しいリビジョンを登録する
+      - name: タスク定義を新しいイメージで登録
+        id: taskdef
+        env:
+          IMAGE_URI: ${{ needs.build.outputs.image_uri }}
+          FAMILY: ${{ steps.cfg.outputs.family }}
+          CONTAINER: ${{ steps.cfg.outputs.container }}
+        run: |
+          set -euo pipefail
+
+          CURRENT=$(aws ecs describe-task-definition \
+            --task-definition "$FAMILY" \
+            --query taskDefinition)
+
+          NEW=$(echo "$CURRENT" | jq \
+            --arg IMAGE "$IMAGE_URI" \
+            --arg NAME "$CONTAINER" '
+              .containerDefinitions |= map(if .name == $NAME then .image = $IMAGE else . end)
+              | del(
+                  .taskDefinitionArn, .revision, .status, .requiresAttributes,
+                  .compatibilities, .registeredAt, .registeredBy
+                )
+            ')
+
+          ARN=$(aws ecs register-task-definition \
+            --cli-input-json "$NEW" \
+            --query taskDefinition.taskDefinitionArn --output text)
+
+          echo "リビジョンを登録しました: $ARN"
+          echo "arn=$ARN" >> "$GITHUB_OUTPUT"
+
+      - name: migrateタスクを実行して完了まで待つ
+        id: run
+        env:
+          TASK_DEF_ARN: ${{ steps.taskdef.outputs.arn }}
+          CLUSTER: ${{ steps.cfg.outputs.cluster }}
+          NETWORK_CONFIG: ${{ steps.cfg.outputs.network }}
+        run: |
+          set -euo pipefail
+
+          TASK_ARN=$(aws ecs run-task \
+            --cluster "$CLUSTER" \
+            --task-definition "$TASK_DEF_ARN" \
+            --launch-type FARGATE \
+            --network-configuration "$NETWORK_CONFIG" \
+            --started-by "gha-${GITHUB_RUN_ID}" \
+            --query 'tasks[0].taskArn' --output text)
+
+          echo "起動しました: $TASK_ARN"
+          echo "task_arn=$TASK_ARN" >> "$GITHUB_OUTPUT"
+          echo "task_id=${TASK_ARN##*/}" >> "$GITHUB_OUTPUT"
+
+          echo "完了を待機しています..."
+          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK_ARN"
+
+      # 成否にかかわらずログを出す。失敗時はここが唯一の手がかりになる
+      - name: 実行ログを表示
+        if: always() && steps.run.outputs.task_id != ''
+        env:
+          TASK_ID: ${{ steps.run.outputs.task_id }}
+          LOG_GROUP: ${{ steps.cfg.outputs.log_group }}
+          CONTAINER: ${{ steps.cfg.outputs.container }}
+        run: |
+          set -uo pipefail
+          aws logs get-log-events \
+            --log-group-name "$LOG_GROUP" \
+            --log-stream-name "migrate/${CONTAINER}/${TASK_ID}" \
+            --query 'events[].message' --output text || echo "ログをまだ取得できませんでした"
+
+      - name: 終了コードを判定
+        env:
+          TASK_ARN: ${{ steps.run.outputs.task_arn }}
+          CLUSTER: ${{ steps.cfg.outputs.cluster }}
+          CONTAINER: ${{ steps.cfg.outputs.container }}
+        run: |
+          set -euo pipefail
+
+          EXIT_CODE=$(aws ecs describe-tasks \
+            --cluster "$CLUSTER" --tasks "$TASK_ARN" \
+            --query "tasks[0].containers[?name=='${CONTAINER}'].exitCode | [0]" \
+            --output text)
+
+          echo "終了コード: $EXIT_CODE"
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "::error::マイグレーションが失敗しました（終了コード ${EXIT_CODE}）"
+            exit 1
+          fi
+
+  ###########################################################################
   # このあと追加予定のジョブ
   #
-  #   migrate: needs.build のイメージで `php artisan migrate` をECSタスクとして実行
-  #            environment を付けて承認待ちにし、手動で進める
-  #   deploy : ECSサービスを新しいイメージへ更新
+  #   deploy: ECSサービスを新しいイメージへ更新
   #
-  # いずれも ECS クラスタ・タスク定義・タスクロールが必要なため、
-  # infra 側（ECSモジュール）の構築後に追加する。
+  #   migrateをスキップしても進むが、失敗したら止める:
+  #     needs: [build, migrate]
+  #     if: ${{ !cancelled()
+  #             && needs.build.result == 'success'
+  #             && needs.migrate.result != 'failure' }}
+  #
+  #   ※ needs に指定したジョブがスキップされると依存側もスキップされるのが
+  #     既定動作のため、!cancelled() が必須。always() だとワークフローを
+  #     キャンセルしてもdeployが走ってしまうので使わない。
   ###########################################################################

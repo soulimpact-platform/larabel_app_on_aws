@@ -28,3 +28,13 @@ variable "ecr_repository_arns" {
   description = "プッシュを許可するECRリポジトリのARN"
   type        = list(string)
 }
+
+variable "ecs" {
+  description = "migrateタスク実行を許可するための情報"
+  type = object({
+    cluster_arn              = string
+    task_role_arns           = list(string)
+    log_group_arn            = string
+    ssm_parameter_arn_prefix = string
+  })
+}

@@ -14,13 +14,27 @@ ecr = {
 github = {
   role_name = "github-actions"
 
-  # このリポジトリの「ブランチ」から実行されたワークフローであれば
-  # ブランチ名を問わず引き受けを許可する（手動実行での検証を優先した設定）。
+  # GitHub Environment "app-prod" を指定したジョブからのみ引き受けを許可する。
   #
-  # refs/heads/* に限定しているのは、pull_request コンテキストを除外するため。
-  # 末尾を "*" だけにすると PR やタグからの実行も通ってしまう。
-  # 本運用時は refs/heads/main に戻すこと。
+  # ジョブに environment を指定すると、JWTのsubクレームは
+  # ブランチ名ではなく environment:<name> の形になる。
+  # そのためブランチを問わず、かつ「app-prod環境を使うジョブ」に限定できる。
+  #
+  # Environment側にReviewer等の保護ルールを掛ければ、
+  # AWSを触れる条件をGitHub側からも制御できるのが利点。
   allowed_subjects = [
-    "repo:soulimpact-platform/larabel_app_on_aws:ref:refs/heads/*",
+    "repo:soulimpact-platform/larabel_app_on_aws:environment:app-prod",
+    "repo:soulimpact-platform/larabel_app_on_aws:environment:app-prod-migrate",
   ]
+}
+
+# ECSモジュールの設定（migrate実行用）
+ecs = {
+  container_name        = "app"
+  log_retention_in_days = 30
+
+  migrate = {
+    cpu    = "512"  # 0.5 vCPU
+    memory = "1024" # 1GB
+  }
 }

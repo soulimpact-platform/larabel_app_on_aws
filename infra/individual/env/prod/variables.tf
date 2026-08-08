@@ -30,3 +30,15 @@ variable "github" {
     allowed_subjects = list(string)
   })
 }
+
+variable "ecs" {
+  description = "ECS configuration"
+  type = object({
+    container_name        = string
+    log_retention_in_days = number
+    migrate = object({
+      cpu    = string
+      memory = string
+    })
+  })
+}
