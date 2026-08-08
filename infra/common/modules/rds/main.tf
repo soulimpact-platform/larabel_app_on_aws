@@ -42,6 +42,38 @@ resource "aws_db_subnet_group" "this" {
 }
 
 ###############################################################################
+# RDS Client Security Group（アプリ層SG）
+#
+# 「RDSに接続してよい者が着ける印」として機能するSG。
+# ingressルールは持たず、RDS側のingressから送信元として参照されることで
+# 意味を持つ。ECSタスクなど接続する側にこれを付与する。
+#
+# 送信元をCIDRではなくSGで指定するため、タスクが増減してもRDS側の
+# ルールを書き換える必要がない。
+#
+# 接続する側は自らアウトバウンド通信を行う（ECRからのpull、SSM取得、
+# RDS接続）ため、egressの明示が必須。書かないとTerraformが既定の
+# 全許可egressを削除してしまう。
+###############################################################################
+resource "aws_security_group" "client" {
+  name        = "${var.project}-${var.environment}-rds-client-sg"
+  description = "Attach to resources that are allowed to connect to the RDS instance"
+  vpc_id      = var.vpc_id
+
+  egress {
+    description = "Allow all outbound"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "${var.project}-${var.environment}-rds-client-sg"
+  }
+}
+
+###############################################################################
 # RDS Security Group
 #
 # egressブロックは意図的に定義していない。RDSは自らアウトバウンド通信を
@@ -53,11 +85,15 @@ resource "aws_security_group" "rds" {
   vpc_id      = var.vpc_id
 
   ingress {
-    description     = "MySQL from allowed security groups"
-    from_port       = var.rds.port
-    to_port         = var.rds.port
-    protocol        = "tcp"
-    security_groups = var.allowed_security_group_ids
+    description = "MySQL from allowed security groups"
+    from_port   = var.rds.port
+    to_port     = var.rds.port
+    protocol    = "tcp"
+
+    security_groups = concat(
+      var.allowed_security_group_ids, # 踏み台など個別に指定されたもの
+      [aws_security_group.client.id], # アプリ層SGを着けたもの
+    )
   }
 
   tags = {

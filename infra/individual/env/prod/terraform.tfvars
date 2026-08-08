@@ -24,5 +24,17 @@ github = {
   # AWSを触れる条件をGitHub側からも制御できるのが利点。
   allowed_subjects = [
     "repo:soulimpact-platform/larabel_app_on_aws:environment:app-prod",
+    "repo:soulimpact-platform/larabel_app_on_aws:environment:app-prod-migrate",
   ]
+}
+
+# ECSモジュールの設定（migrate実行用）
+ecs = {
+  container_name        = "app"
+  log_retention_in_days = 30
+
+  migrate = {
+    cpu    = "512"  # 0.5 vCPU
+    memory = "1024" # 1GB
+  }
 }

@@ -28,6 +28,11 @@ output "security_group_id" {
   value       = aws_security_group.rds.id
 }
 
+output "client_security_group_id" {
+  description = "RDSへの接続を許可されるリソースに付与するSG（ECSタスク等に着ける）"
+  value       = aws_security_group.client.id
+}
+
 output "db_subnet_group_name" {
   description = "DB subnet group name"
   value       = aws_db_subnet_group.this.name
