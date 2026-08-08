@@ -1,0 +1,104 @@
+name: CI
+
+# 当面は手動実行のみ。Actionsタブの「Run workflow」から
+# 任意のブランチ（mainを含む）を選んで実行する。
+#
+# 注意: workflow_dispatch はデフォルトブランチ（main）にこのファイルが
+# 存在しないとActionsタブに現れない。
+#
+# 自動ビルドに戻す場合は以下のpushトリガーを復活させる:
+#   push:
+#     branches: [main]
+#     paths: ["app/**", ".github/workflows/ci.yml"]
+on:
+  workflow_dispatch:
+
+# 同じブランチの実行が重ならないようにする
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# OIDCのIDトークン発行に必要。これが無いとAWSへの認証ができない
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-northeast-1
+  ECR_REPOSITORY: larabel-app-prod-app
+
+jobs:
+  ###########################################################################
+  # イメージのビルドとECRへのpush
+  #
+  # 後続ジョブ（migrate / deploy）が使えるよう、
+  # プッシュしたイメージのURIをoutputsで公開する
+  ###########################################################################
+  build:
+    name: Build and push image
+    runs-on: ubuntu-latest
+
+    outputs:
+      image_uri: ${{ steps.meta.outputs.image_uri }}
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: AWSへOIDCで認証
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: ECRへログイン
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: イメージタグを決定
+        id: meta
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          IMAGE_TAG="${GITHUB_SHA}"
+          {
+            echo "image_tag=${IMAGE_TAG}"
+            echo "image_uri=${REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Buildxをセットアップ
+        uses: docker/setup-buildx-action@v3
+
+      - name: イメージをビルドしてプッシュ
+        uses: docker/build-push-action@v6
+        with:
+          context: ./app
+          file: ./app/docker/php/Dockerfile.prod
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image_uri }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+          # GitHub Actionsのキャッシュを使ってcomposer/npmの再ダウンロードを避ける
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: プッシュしたイメージを表示
+        run: |
+          {
+            echo "### プッシュ完了 :rocket:"
+            echo ""
+            echo "- \`${{ steps.meta.outputs.image_uri }}\`"
+            echo "- \`${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  ###########################################################################
+  # このあと追加予定のジョブ
+  #
+  #   migrate: needs.build のイメージで `php artisan migrate` をECSタスクとして実行
+  #            environment を付けて承認待ちにし、手動で進める
+  #   deploy : ECSサービスを新しいイメージへ更新
+  #
+  # いずれも ECS クラスタ・タスク定義・タスクロールが必要なため、
+  # infra 側（ECSモジュール）の構築後に追加する。
+  ###########################################################################
