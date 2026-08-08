@@ -12,11 +12,6 @@ name: CI
 #     paths: ["app/**", ".github/workflows/ci.yml"]
 on:
   workflow_dispatch:
-    inputs:
-      run_migrate:
-        description: "DBマイグレーションを実行する"
-        type: boolean
-        default: false
 
 # 同じブランチの実行が重ならないようにする
 concurrency:
@@ -108,18 +103,20 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   ###########################################################################
-  # DBマイグレーション（任意実行）
+  # DBマイグレーション（承認制）
   #
-  # 実行時に run_migrate をチェックしたときだけ動く。
-  # environment に承認者を設定しておけば、ここで停止して承認待ちになる。
+  # buildが終わるとこのジョブは保留状態で停止し、実行ページに
+  # 「Review deployments」ボタンが出る。承認すれば実行、
+  # 承認しなければ保留のまま（タイムアウトまで待機）。
   #
-  # このジョブをスキップしても後続のdeployは進む。ただし「失敗」した場合は
-  # 後続を止める（旧スキーマのまま新コードが動く事故を防ぐため）。
+  # 実行前ではなくbuildの結果を見てから判断できるのが利点。
+  #
+  # 注意: 却下(Reject)は「スキップ」ではなく「失敗」として扱われる。
+  # 後続にdeployを足す際は、却下でdeployも止まる点に留意すること。
   ###########################################################################
   migrate:
     name: Run database migration
     needs: build
-    if: ${{ inputs.run_migrate }}
     runs-on: ubuntu-latest
 
     # 承認ゲート用。app-prod とは別環境にすることで、
