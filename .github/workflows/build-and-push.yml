@@ -1,13 +1,16 @@
 name: Build and Push to ECR
 
+# 当面は手動実行のみ。Actionsタブの「Run workflow」から
+# 任意のブランチ（mainを含む）を選んで実行する。
+#
+# 注意: workflow_dispatch はデフォルトブランチ（main）にこのファイルが
+# 存在しないとActionsタブに現れない。初回だけmainへのマージが必要。
+#
+# 自動ビルドに戻す場合は以下のpushトリガーを復活させる:
+#   push:
+#     branches: [main]
+#     paths: ["app/**", ".github/workflows/build-and-push.yml"]
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "app/**"
-      - ".github/workflows/build-and-push.yml"
-  # 手動実行も可能にしておく
   workflow_dispatch:
 
 # 同じブランチのビルドが重ならないようにする

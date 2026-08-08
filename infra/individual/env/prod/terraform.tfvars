@@ -14,8 +14,13 @@ ecr = {
 github = {
   role_name = "github-actions"
 
-  # mainブランチのワークフローからのみロールを引き受け可能にする
+  # このリポジトリの「ブランチ」から実行されたワークフローであれば
+  # ブランチ名を問わず引き受けを許可する（手動実行での検証を優先した設定）。
+  #
+  # refs/heads/* に限定しているのは、pull_request コンテキストを除外するため。
+  # 末尾を "*" だけにすると PR やタグからの実行も通ってしまう。
+  # 本運用時は refs/heads/main に戻すこと。
   allowed_subjects = [
-    "repo:soulimpact-platform/larabel_app_on_aws:ref:refs/heads/main",
+    "repo:soulimpact-platform/larabel_app_on_aws:ref:refs/heads/*",
   ]
 }
