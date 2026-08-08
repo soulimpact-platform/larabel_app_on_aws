@@ -38,6 +38,12 @@ jobs:
     name: Build and push image
     runs-on: ubuntu-latest
 
+    # 本番環境向けの設定（AWS_DEPLOY_ROLE_ARN）はこのEnvironmentに紐づく。
+    # 注意: environmentを指定するとOIDCのsubクレームが
+    #   repo:<org>/<repo>:environment:app-prod
+    # に変わる。信頼ポリシー(allowed_subjects)も同じ値にしておくこと。
+    environment: app-prod
+
     outputs:
       image_uri: ${{ steps.meta.outputs.image_uri }}
       image_tag: ${{ steps.meta.outputs.image_tag }}
