@@ -64,6 +64,15 @@ resource "aws_instance" "bastion" {
   key_name               = aws_key_pair.bastion.key_name
   vpc_security_group_ids = [aws_security_group.bastion.id]
 
+  # 初期セットアップスクリプト（内容は user_data/bastion.sh を参照）
+  # 変数の埋め込みが必要になったら templatefile() に切り替える
+  user_data = file("${path.module}/user_data/bastion.sh")
+
+  # user_dataは初回起動時にしか実行されない。既定（false）のままだと
+  # スクリプトを修正しても既存インスタンスに反映されないため、
+  # 変更時はインスタンスを作り直す設定にしておく
+  user_data_replace_on_change = true
+
   tags = {
     Name = "${var.project}-${var.environment}-public-bastion"
   }
