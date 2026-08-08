@@ -173,30 +173,96 @@ OIDC はトークンに実行元が書かれているため、そこに条件を
 
 ### sub クレームによる判定
 
-信頼ポリシーの `sub` 条件が実際にどう効くか。許可しているのは 1 行目だけです。
+判定はブランチ名ではなく **GitHub Environment** で行っています。
+ジョブに `environment:` を指定すると、JWT の `sub` は
+`repo:<org>/<repo>:environment:<name>` の形になります。
 
 | JWT の sub クレーム | 状況 | 判定 |
 | --- | --- | --- |
-| `repo:soulimpact-platform/larabel_app_on_aws:ref:refs/heads/main` | main への push | ✅ 引き受け可 |
-| `repo:soulimpact-platform/larabel_app_on_aws:ref:refs/heads/dev` | 別ブランチでの実行 | ❌ 拒否 |
-| `repo:soulimpact-platform/larabel_app_on_aws:pull_request` | PR コンテキストでの実行 | ❌ 拒否 |
-| `repo:attacker/evil-repo:ref:refs/heads/main` | 第三者のリポジトリ | ❌ 拒否 |
+| `repo:soulimpact-platform/larabel_app_on_aws:environment:app-prod` | build ジョブ | ✅ 引き受け可 |
+| `repo:soulimpact-platform/larabel_app_on_aws:environment:app-prod-migrate` | migrate ジョブ | ✅ 引き受け可 |
+| `repo:soulimpact-platform/larabel_app_on_aws:ref:refs/heads/main` | environment 指定なしのジョブ | ❌ 拒否 |
+| `repo:attacker/evil-repo:environment:app-prod` | 第三者のリポジトリ | ❌ 拒否 |
 
-3 行目が拒否になるのは意図した挙動です。フォークからの PR でワークフローが動いても AWS には一切触れられません。
-`dev` ブランチや GitHub Environments からも使いたくなったら、`allowed_subjects` に行を足します。
+ブランチ名で判定していた頃と比べ、**環境という単位に権限の境界が一本化**されています。
+Environment 側に Required reviewers を設定すれば、
+GitHub の承認を通らない限り AWS の認証情報そのものが発行されません。
+
+3 行目が拒否になる点に注意してください。ジョブに `environment:` を書き忘れると
+`sub` がブランチ形式に戻るため、認証に失敗します。
 
 ### 設定箇所
 
 | 場所 | 内容 |
 | --- | --- |
 | `common/modules/github_oidc/main.tf` | OIDC プロバイダ（信頼の起点。アカウントに1つ） |
-| `individual/modules/sts_assume_role/main.tf` | 信頼ポリシー、IAM ロール、ECR 用の権限 |
-| `individual/env/prod/terraform.tfvars` | `github.allowed_subjects` — 引き受けを許すリポジトリとブランチ |
-| `.github/workflows/build-and-push.yml` | `permissions.id-token: write` と `role-to-assume` |
-| GitHub → Settings → Variables | `AWS_DEPLOY_ROLE_ARN`（秘密情報ではないため Secrets ではなく Variables） |
+| `individual/modules/sts_assume_role/main.tf` | 信頼ポリシー、IAM ロール、ECR / ECS 用の権限 |
+| `individual/env/prod/terraform.tfvars` | `github.allowed_subjects` — 引き受けを許す Environment |
+| `.github/workflows/ci.yml` | `permissions.id-token: write` と `environment:` の指定 |
+| GitHub → Settings → Environments | `app-prod` / `app-prod-migrate` と変数 `AWS_DEPLOY_ROLE_ARN` |
+
+ロール ARN は秘密情報ではないため Secrets ではなく Variables に置いています。
+prod 専用の値なのでリポジトリ変数ではなく **Environment 変数**として設定しています。
 
 前掲の連鎖図でいうと、`aws_iam_openid_connect_provider` だけが common、
 `assume_role_policy` 以降の 3 つが individual にあたります。
+
+## CI/CD の流れ
+
+`.github/workflows/ci.yml` は手動実行（`workflow_dispatch`）のみです。
+
+```mermaid
+flowchart TD
+    RUN["Actions → Run workflow"]
+    BUILD["build ジョブ<br/>environment: app-prod"]
+    ECR[("Amazon ECR")]
+    GATE{"migrate ジョブ<br/>environment: app-prod-migrate<br/>承認待ちで停止"}
+    TASK["ECS Fargate タスク<br/>php artisan migrate --force"]
+    RDS[("RDS MySQL")]
+
+    RUN --> BUILD
+    BUILD -->|"イメージをpush<br/>タグ = コミットSHA"| ECR
+    BUILD --> GATE
+    GATE -->|Approve| TASK
+    GATE -->|放置 / Reject| STOP["実行されない"]
+    ECR -.->|"pull"| TASK
+    TASK -->|"3306"| RDS
+
+    classDef gate fill:#fdf3e0,stroke:#b0761c,color:#3a2b0c
+    class GATE gate
+```
+
+### 押さえておきたい点
+
+- **イメージはコミット SHA で固定**。build ジョブが `outputs.image_uri` として公開し、
+  migrate ジョブがそれを受け取る。`latest` を引き直さないのでビルドしたものと実行するものが必ず一致する
+- **`run-task` では image を上書きできない**ため、migrate ジョブは
+  「既存のタスク定義の image を差し替えた新リビジョン」を登録してから起動する
+- **DB 認証情報は SSM から注入**。タスク定義の `secrets` で解決されるため、
+  タスク定義にも CI のログにも平文が現れない
+- **migrate は冪等**。未適用のマイグレーションが無ければ `Nothing to migrate.` で終了コード 0
+- 却下（Reject）は「スキップ」ではなく**失敗**として扱われる。
+  実行したくない場合は承認せず放置する
+
+### CI が知っている固定値
+
+ワークフローがハードコードしているのは SSM のパラメータ名 1 つだけです。
+クラスタ名・タスク定義・コンテナ名・ロググループ・ネットワーク構成は
+すべてこのパラメータに JSON で入っており、Terraform が書き出しています。
+
+```yaml
+env:
+  ECS_CONFIG_PARAM: /larabel-app/prod/ecs/migrate
+```
+
+```bash
+# 中身の確認
+aws ssm get-parameter --name /larabel-app/prod/ecs/migrate \
+  --query Parameter.Value --output text | jq .
+```
+
+サブネット ID と SG ID は AWS が採番するため Terraform でしか分からず、
+`run-task` には `--network-configuration` の指定が必須なので、この受け渡しが必要になります。
 
 ## ディレクトリ構成
 
@@ -214,15 +280,47 @@ infra/
 │       ├── ssm_parameter/    # SSMパラメータ（汎用）
 │       ├── vpc/              # VPC / サブネット / IGW / NAT
 │       ├── ec2/              # 踏み台サーバー
-│       ├── rds/              # RDS for MySQL
+│       ├── rds/              # RDS for MySQL + アプリ層SG
 │       └── github_oidc/      # OIDCプロバイダ（アカウントに1つだけ）
 └── individual/               # 個別対応
     ├── env/prod/
     │   └── *.tf              # key = individual/env/prod/terraform.tfstate
     └── modules/
         ├── ecr/              # コンテナイメージ置き場
+        ├── ecs/              # クラスタ / migrateタスク定義 / ロール / ログ
         └── sts_assume_role/  # OIDCを引き受けるIAMロール（用途ごとに複数可）
 ```
+
+### RDS への接続許可（アプリ層SG）
+
+ECS タスクは `individual`、RDS は `common` にあります。
+RDS 側の ingress に ECS の SG を直接書くと **common と individual が相互参照**になり、
+初回 apply がデッドロックします。
+
+そこで `common/modules/rds` に「印」としての SG を1つ置き、RDS はそれを許可します。
+
+```mermaid
+flowchart LR
+    subgraph C["common"]
+        CLIENT["aws_security_group.client<br/>ingressルールを持たない「印」"]
+        RDSSG["RDS用SG<br/>3306 の送信元に client を指定"]
+        RDS[("RDS MySQL")]
+        CLIENT -.->|"送信元として参照"| RDSSG
+        RDSSG --> RDS
+    end
+
+    subgraph I["individual"]
+        TASK["ECSタスク"]
+    end
+
+    TASK -->|"このSGを着る"| CLIENT
+```
+
+common は「この印を着けた者は 3306 に来てよい」と宣言するだけで、
+誰が着けるかを知りません。依存は **individual → common の一方向**に保たれます。
+
+送信元を CIDR ではなく SG で指定しているため、
+**タスクが増減しても、新しいサービスを足しても、RDS 側は一切触らずに済みます**。
 
 ### なぜ分けているか
 
@@ -235,8 +333,9 @@ infra/
 OIDC「プロバイダ」は URL ごとに AWS アカウント内で 1 つしか作れないため common に置き、
 それを引き受ける「ロール」は用途ごとに何個でも作れるため individual に置いています。
 
-individual 側は common の state を読まず、URL 指定の data source でプロバイダを引いています。
-state 同士が結合しないので、common を作り直しても individual は影響を受けません。
+individual から common への参照は 2 通り使い分けています。
+
+**OIDC プロバイダ** — URL が固定値なので data source で直接引きます。state 同士が結合しません。
 
 ```hcl
 data "aws_iam_openid_connect_provider" "github" {
@@ -244,7 +343,24 @@ data "aws_iam_openid_connect_provider" "github" {
 }
 ```
 
-そのかわり **common を先に apply する**必要があります（プロバイダが無いと data source が解決できない）。
+**VPC / サブネット / RDS** — AWS が採番した ID が必要なので state を読みます。
+
+```hcl
+data "terraform_remote_state" "common" {
+  backend = "s3"
+  config = {
+    bucket = "larabel-app-terraform-state"
+    key    = "common/env/prod/terraform.tfstate"
+    region = "ap-northeast-1"
+  }
+}
+```
+
+どちらも **individual → common の一方向**です。common は individual を知りません。
+
+そのかわり **common を先に apply する**必要があります。
+common の outputs（`private_subnet_ids` / `rds_client_security_group_id` / `rds_address` など）は
+individual が依存しているため、**削除・改名するとindividualの apply が壊れます**。
 
 ### state
 
@@ -257,16 +373,38 @@ data "aws_iam_openid_connect_provider" "github" {
 | `individual/env/prod` | `individual/env/prod/terraform.tfstate` |
 | `common/env/prod/bootstrap` | ローカル（このバケット自体を作るため） |
 
+### apply の順序
+
+```bash
+# 1. stateバケットとSSMパラメータ（初回のみ）
+cd infra/common/env/prod/bootstrap && terraform apply
+
+# 2. VPC / 踏み台 / RDS / OIDCプロバイダ
+cd infra/common/env/prod && terraform apply
+
+# 3. ECR / ECS / AssumeRole用ロール
+cd infra/individual/env/prod && terraform apply
+```
+
 ## 現状
 
 | 領域 | 状態 |
 | --- | --- |
 | VPC（サブネット / IGW / NAT） | 構築済み |
 | 踏み台 EC2 | 構築済み |
-| RDS for MySQL | 構築済み |
-| ECR / GitHub Actions OIDC | コード作成済み・apply 待ち |
-| ECS（migrate タスク / サービス） | 未着手 |
+| RDS for MySQL | 構築済み（単一AZ / リードレプリカなし） |
+| ECR / GitHub Actions OIDC | 構築済み・CI から push 実績あり |
+| ECS（migrate タスク） | 構築済み・migrate 実行済み |
+| ECS（Web サービス） | 未着手 |
 | ALB / CloudFront / WAF | 未着手 |
+
+### 次にやること
+
+- **`APP_KEY` を SSM に追加**する。migrate では不要だが Web アプリの起動には必須。
+  `bootstrap` の `ssm_parameter` に追加し、`php artisan key:generate --show` の値を設定する
+- Web 用の ECS サービス、ALB、CloudFront、WAF
+- deploy ジョブ追加時に migrate の承認フローを再検討する。
+  却下が「失敗」扱いのため、現状のままでは deploy も止まる
 
 ### 既知の課題
 
@@ -274,3 +412,7 @@ data "aws_iam_openid_connect_provider" "github" {
 - 踏み台の SSH 秘密鍵を `tls_private_key` で生成しているため、tfstate に平文で残る
 - 踏み台に IAM インスタンスプロファイルが未設定のため、インスタンス上から AWS API を呼べない
 - RDS は `deletion_protection = false` / `skip_final_snapshot = true`。本運用前に反転させること
+- RDS の `db_name` / `username` は SSM の値を参照している。
+  **これらを変更するとインスタンスが再作成される**（`ForceNew`）ため、データが消える。
+  パスワードは write-only 引数のため安全で、`password_version` を増やすだけで反映される
+- migrate は `--isolated` を付けていない。`cache_locks` テーブルができたので付与可能
