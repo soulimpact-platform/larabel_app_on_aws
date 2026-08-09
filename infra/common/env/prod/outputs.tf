@@ -9,6 +9,11 @@ output "vpc_id" {
   value       = module.vpc.vpc_id
 }
 
+output "public_subnet_ids" {
+  description = "PublicサブネットのID（ALBの配置先。マルチAZ必須）"
+  value       = module.vpc.public_subnet_ids
+}
+
 output "private_subnet_ids" {
   description = "PrivateサブネットのID（ECSタスクの配置先）"
   value       = module.vpc.private_subnet_ids

@@ -119,6 +119,17 @@ data "aws_iam_policy_document" "ecs_run_task" {
     }
   }
 
+  # Webサービスのデプロイ。対象サービスをARNで限定する
+  statement {
+    sid    = "UpdateService"
+    effect = "Allow"
+    actions = [
+      "ecs:UpdateService",
+      "ecs:DescribeServices",
+    ]
+    resources = var.ecs.service_arns
+  }
+
   # タスク定義に指定したロールをECSへ渡すために必要。
   # 渡せるロールを限定しないと任意の権限を持つタスクを起動できてしまう
   statement {

@@ -25,11 +25,13 @@ permissions:
 
 env:
   AWS_REGION: ap-northeast-1
-  ECR_REPOSITORY: larabel-app-prod-app
-  # migrate実行に必要な値（クラスタ名・タスク定義・コンテナ名・ロググループ・
-  # ネットワーク構成）はすべてこのSSMパラメータにJSONで入っている。
-  # ワークフローがECS側について知る固定値はこれだけ
-  ECS_CONFIG_PARAM: /larabel-app/prod/ecs/migrate
+  ECR_REPOSITORY_APP: larabel-app-prod-app
+  ECR_REPOSITORY_NGINX: larabel-app-prod-nginx
+  # 実行に必要な値（クラスタ名・タスク定義・コンテナ名・ロググループ・
+  # ネットワーク構成・サービス名）はすべてこれらのSSMパラメータにJSONで入っている。
+  # ワークフローがECS側について知る固定値はこの2つだけ
+  ECS_MIGRATE_PARAM: /larabel-app/prod/ecs/migrate
+  ECS_WEB_PARAM: /larabel-app/prod/ecs/web
 
 jobs:
   ###########################################################################
@@ -49,7 +51,8 @@ jobs:
     environment: app-prod
 
     outputs:
-      image_uri: ${{ steps.meta.outputs.image_uri }}
+      app_image_uri: ${{ steps.meta.outputs.app_image_uri }}
+      nginx_image_uri: ${{ steps.meta.outputs.nginx_image_uri }}
       image_tag: ${{ steps.meta.outputs.image_tag }}
 
     steps:
@@ -74,22 +77,41 @@ jobs:
           IMAGE_TAG="${GITHUB_SHA}"
           {
             echo "image_tag=${IMAGE_TAG}"
-            echo "image_uri=${REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+            echo "app_image_uri=${REGISTRY}/${ECR_REPOSITORY_APP}:${IMAGE_TAG}"
+            echo "nginx_image_uri=${REGISTRY}/${ECR_REPOSITORY_NGINX}:${IMAGE_TAG}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Buildxをセットアップ
         uses: docker/setup-buildx-action@v3
 
-      - name: イメージをビルドしてプッシュ
+      # nginxとphp-fpmは同一タスクの2コンテナとして動くため、
+      # 必ず同じコミットからビルドして同じタグを付ける
+      - name: アプリイメージ(php-fpm)をビルドしてプッシュ
         uses: docker/build-push-action@v6
         with:
           context: ./app
-          file: ./app/docker/php/Dockerfile.prod
+          file: ./app/docker/php/Dockerfile
+          # イメージは環境non依存。stagingにもproductionにも同じものを配る
+          target: runtime
           push: true
           tags: |
-            ${{ steps.meta.outputs.image_uri }}
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+            ${{ steps.meta.outputs.app_image_uri }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_APP }}:latest
           # GitHub Actionsのキャッシュを使ってcomposer/npmの再ダウンロードを避ける
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: nginxイメージをビルドしてプッシュ
+        uses: docker/build-push-action@v6
+        with:
+          context: ./app
+          file: ./app/docker/php/Dockerfile
+          target: nginx
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.nginx_image_uri }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_NGINX }}:latest
+          # vendor/assetsステージはアプリ側でビルド済みなのでキャッシュが効く
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -98,8 +120,8 @@ jobs:
           {
             echo "### プッシュ完了 :rocket:"
             echo ""
-            echo "- \`${{ steps.meta.outputs.image_uri }}\`"
-            echo "- \`${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest\`"
+            echo "- \`${{ steps.meta.outputs.app_image_uri }}\`"
+            echo "- \`${{ steps.meta.outputs.nginx_image_uri }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
   ###########################################################################
@@ -138,7 +160,7 @@ jobs:
           set -euo pipefail
 
           CFG=$(aws ssm get-parameter \
-            --name "$ECS_CONFIG_PARAM" \
+            --name "$ECS_MIGRATE_PARAM" \
             --query Parameter.Value --output text)
 
           {
@@ -154,7 +176,7 @@ jobs:
       - name: タスク定義を新しいイメージで登録
         id: taskdef
         env:
-          IMAGE_URI: ${{ needs.build.outputs.image_uri }}
+          IMAGE_URI: ${{ needs.build.outputs.app_image_uri }}
           FAMILY: ${{ steps.cfg.outputs.family }}
           CONTAINER: ${{ steps.cfg.outputs.container }}
         run: |
@@ -239,17 +261,116 @@ jobs:
           fi
 
   ###########################################################################
-  # このあと追加予定のジョブ
+  # Webサービスのデプロイ
   #
-  #   deploy: ECSサービスを新しいイメージへ更新
+  # migrateが「スキップ」されても進むが、「失敗」した場合は止める。
+  # 旧スキーマのDBに新しいコードを載せる事故を防ぐため。
   #
-  #   migrateをスキップしても進むが、失敗したら止める:
-  #     needs: [build, migrate]
-  #     if: ${{ !cancelled()
-  #             && needs.build.result == 'success'
-  #             && needs.migrate.result != 'failure' }}
-  #
-  #   ※ needs に指定したジョブがスキップされると依存側もスキップされるのが
-  #     既定動作のため、!cancelled() が必須。always() だとワークフローを
-  #     キャンセルしてもdeployが走ってしまうので使わない。
+  # ※ needs に指定したジョブがスキップされると依存側もスキップされるのが
+  #   既定動作のため !cancelled() が必須。always() だとワークフローを
+  #   キャンセルしてもdeployが走ってしまうので使わない。
   ###########################################################################
+  deploy:
+    name: Deploy web service
+    needs: [build, migrate]
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.migrate.result != 'failure' }}
+    runs-on: ubuntu-latest
+
+    environment: app-prod
+
+    steps:
+      - name: AWSへOIDCで認証
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: デプロイパラメータを取得
+        id: cfg
+        run: |
+          set -euo pipefail
+
+          CFG=$(aws ssm get-parameter \
+            --name "$ECS_WEB_PARAM" \
+            --query Parameter.Value --output text)
+
+          {
+            echo "cluster=$(jq -r .cluster <<<"$CFG")"
+            echo "service=$(jq -r .service <<<"$CFG")"
+            echo "family=$(jq -r .taskDefinitionFamily <<<"$CFG")"
+          } >> "$GITHUB_OUTPUT"
+
+      # nginxとappの2コンテナ分のimageを、同じコミットのものへ差し替える
+      - name: タスク定義を新しいイメージで登録
+        id: taskdef
+        env:
+          APP_IMAGE: ${{ needs.build.outputs.app_image_uri }}
+          NGINX_IMAGE: ${{ needs.build.outputs.nginx_image_uri }}
+          FAMILY: ${{ steps.cfg.outputs.family }}
+        run: |
+          set -euo pipefail
+
+          CURRENT=$(aws ecs describe-task-definition \
+            --task-definition "$FAMILY" \
+            --query taskDefinition)
+
+          NEW=$(echo "$CURRENT" | jq \
+            --arg APP "$APP_IMAGE" \
+            --arg NGINX "$NGINX_IMAGE" '
+              .containerDefinitions |= map(
+                  if   .name == "app"   then .image = $APP
+                  elif .name == "nginx" then .image = $NGINX
+                  else . end
+                )
+              | del(
+                  .taskDefinitionArn, .revision, .status, .requiresAttributes,
+                  .compatibilities, .registeredAt, .registeredBy
+                )
+            ')
+
+          ARN=$(aws ecs register-task-definition \
+            --cli-input-json "$NEW" \
+            --query taskDefinition.taskDefinitionArn --output text)
+
+          echo "リビジョンを登録しました: $ARN"
+          echo "arn=$ARN" >> "$GITHUB_OUTPUT"
+
+      # サービスを新リビジョンへ更新する。
+      # deployment_circuit_breaker が有効なので、新タスクがヘルスチェックを
+      # 通らない場合はAWS側が自動で前のリビジョンへロールバックする
+      - name: サービスを更新して安定するまで待つ
+        env:
+          CLUSTER: ${{ steps.cfg.outputs.cluster }}
+          SERVICE: ${{ steps.cfg.outputs.service }}
+          TASK_DEF_ARN: ${{ steps.taskdef.outputs.arn }}
+        run: |
+          set -euo pipefail
+
+          aws ecs update-service \
+            --cluster "$CLUSTER" \
+            --service "$SERVICE" \
+            --task-definition "$TASK_DEF_ARN" \
+            --query 'service.deployments[0].{Status:status,Desired:desiredCount}' \
+            --output json
+
+          echo "デプロイの完了を待機しています（数分かかります）..."
+          aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
+
+      - name: デプロイ結果を表示
+        if: always()
+        env:
+          CLUSTER: ${{ steps.cfg.outputs.cluster }}
+          SERVICE: ${{ steps.cfg.outputs.service }}
+        run: |
+          set -uo pipefail
+
+          aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+            --query 'services[0].{TaskDefinition:taskDefinition,Running:runningCount,Desired:desiredCount,Status:status}' \
+            --output table
+
+          {
+            echo "### デプロイ完了 :ship:"
+            echo ""
+            echo "- URL: https://alb-larabel.sukunahikona.org"
+            echo "- イメージタグ: \`${{ needs.build.outputs.image_tag }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

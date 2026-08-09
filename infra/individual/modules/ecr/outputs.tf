@@ -1,14 +1,14 @@
-output "repository_name" {
-  description = "ECRリポジトリ名"
-  value       = aws_ecr_repository.this.name
+output "repository_names" {
+  description = "ECRリポジトリ名（キーごと）"
+  value       = { for k, v in aws_ecr_repository.this : k => v.name }
 }
 
-output "repository_url" {
+output "repository_urls" {
   description = "ECRリポジトリのURL（docker pushの宛先）"
-  value       = aws_ecr_repository.this.repository_url
+  value       = { for k, v in aws_ecr_repository.this : k => v.repository_url }
 }
 
-output "repository_arn" {
-  description = "ECRリポジトリのARN（IAMポリシーのリソース指定に使う）"
-  value       = aws_ecr_repository.this.arn
+output "repository_arns" {
+  description = "ECRリポジトリのARN一覧（IAMポリシーのリソース指定に使う）"
+  value       = [for v in aws_ecr_repository.this : v.arn]
 }

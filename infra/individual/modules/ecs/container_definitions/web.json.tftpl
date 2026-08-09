@@ -1,0 +1,66 @@
+[
+  {
+    "//": "リバースプロキシ。ALBからのリクエストを受け、PHPは同一タスク内のappへ転送する",
+    "name": "${nginx_container_name}",
+    "image": "${nginx_image}",
+    "essential": true,
+
+    "portMappings": [
+      { "containerPort": 80, "protocol": "tcp" }
+    ],
+
+    "//dependsOn": "php-fpmが起動してからnginxを開始する。逆だと初回リクエストが502になる",
+    "dependsOn": [
+      { "containerName": "${app_container_name}", "condition": "START" }
+    ],
+
+    "environment": [
+      { "name": "FASTCGI_PASS", "value": "127.0.0.1:9000" }
+    ],
+
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "${log_group}",
+        "awslogs-region": "${region}",
+        "awslogs-stream-prefix": "web-nginx"
+      }
+    }
+  },
+  {
+    "//": "アプリケーション本体。php-fpmとして9000番で待ち受ける",
+    "name": "${app_container_name}",
+    "image": "${app_image}",
+    "essential": true,
+
+    "//portMappings": "awsvpcではタスク内でlocalhostを共有するため、公開は不要",
+
+    "//APP_URL": "リンクやリダイレクトの生成に使われる。ALBがTLSを終端するためhttpsを明示する",
+    "environment": [
+      { "name": "APP_ENV", "value": "production" },
+      { "name": "APP_DEBUG", "value": "false" },
+      { "name": "APP_URL", "value": "${app_url}" },
+      { "name": "LOG_CHANNEL", "value": "stderr" },
+      { "name": "DB_CONNECTION", "value": "mysql" },
+      { "name": "DB_HOST", "value": "${db_host}" },
+      { "name": "DB_PORT", "value": "${db_port}" }
+    ],
+
+    "//secrets": "値はタスク起動時にSSMから解決される。タスク定義にもCIにも平文が現れない",
+    "secrets": [
+      { "name": "APP_KEY", "valueFrom": "${ssm_app_prefix}/app_key" },
+      { "name": "DB_DATABASE", "valueFrom": "${ssm_rds_prefix}/db_name" },
+      { "name": "DB_USERNAME", "valueFrom": "${ssm_rds_prefix}/username" },
+      { "name": "DB_PASSWORD", "valueFrom": "${ssm_rds_prefix}/password" }
+    ],
+
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "${log_group}",
+        "awslogs-region": "${region}",
+        "awslogs-stream-prefix": "web-app"
+      }
+    }
+  }
+]

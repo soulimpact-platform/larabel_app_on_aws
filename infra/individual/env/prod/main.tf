@@ -39,6 +39,19 @@ module "ecr" {
   ecr         = var.ecr
 }
 
+# ALB / ACM証明書 / Route53レコード。アプリの公開口
+module "alb" {
+  source = "../../modules/alb"
+
+  project     = var.project
+  environment = var.environment
+  alb         = var.alb
+  dns         = var.dns
+
+  vpc_id     = data.terraform_remote_state.common.outputs.vpc_id
+  subnet_ids = data.terraform_remote_state.common.outputs.public_subnet_ids
+}
+
 module "ecs" {
   source = "../../modules/ecs"
 
@@ -46,10 +59,27 @@ module "ecs" {
   environment = var.environment
   ecs         = var.ecs
 
-  ecr_repository_url = module.ecr.repository_url
+  vpc_id = data.terraform_remote_state.common.outputs.vpc_id
 
-  subnet_ids         = data.terraform_remote_state.common.outputs.private_subnet_ids
+  ecr_repository_urls = {
+    app   = module.ecr.repository_urls["app"]
+    nginx = module.ecr.repository_urls["nginx"]
+  }
+
+  subnet_ids = data.terraform_remote_state.common.outputs.private_subnet_ids
+
+  # migrateタスク用。RDSへ到達するためのSG
   security_group_ids = [data.terraform_remote_state.common.outputs.rds_client_security_group_id]
+
+  # Webタスク用。ALBからの受信を許可するSGに加えて付与する
+  additional_security_group_ids = [data.terraform_remote_state.common.outputs.rds_client_security_group_id]
+
+  alb = {
+    security_group_id = module.alb.security_group_id
+    target_group_arn  = module.alb.target_group_arn
+  }
+
+  app_url = module.alb.url
 
   db = {
     host = data.terraform_remote_state.common.outputs.rds_address
@@ -65,10 +95,11 @@ module "sts_assume_role" {
   github      = var.github
 
   oidc_provider_arn   = data.aws_iam_openid_connect_provider.github.arn
-  ecr_repository_arns = [module.ecr.repository_arn]
+  ecr_repository_arns = module.ecr.repository_arns
 
   ecs = {
     cluster_arn              = module.ecs.cluster_arn
+    service_arns             = module.ecs.service_arns
     task_role_arns           = module.ecs.task_role_arns
     log_group_arn            = module.ecs.log_group_arn
     ssm_parameter_arn_prefix = module.ecs.ssm_parameter_arn_prefix

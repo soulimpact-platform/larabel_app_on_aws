@@ -35,6 +35,15 @@ module "ssm_parameter" {
   environment = var.environment
 
   parameters = {
+    # Laravelのアプリケーションキー。セッション・暗号化に使われる。
+    # 初期値はdummy。`php artisan key:generate --show` の出力を
+    # AWS ConsoleまたはCLIで設定すること
+    "app/app_key" = {
+      value       = var.app_key
+      type        = "SecureString"
+      description = "Laravel APP_KEY"
+    }
+
     "rds/db_name" = {
       value       = var.db_credentials.db_name
       type        = "String"
