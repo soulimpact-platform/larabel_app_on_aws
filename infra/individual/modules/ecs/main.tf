@@ -345,6 +345,7 @@ resource "aws_ssm_parameter" "web_runtime" {
     service              = aws_ecs_service.web.name
     taskDefinitionFamily = aws_ecs_task_definition.web.family
     logGroup             = aws_cloudwatch_log_group.this.name
+    url                  = var.app_url
 
     # CIがimageを差し替える対象。キーがコンテナ名、値がECRリポジトリURL
     containers = {

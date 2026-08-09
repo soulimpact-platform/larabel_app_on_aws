@@ -298,6 +298,7 @@ jobs:
             echo "cluster=$(jq -r .cluster <<<"$CFG")"
             echo "service=$(jq -r .service <<<"$CFG")"
             echo "family=$(jq -r .taskDefinitionFamily <<<"$CFG")"
+            echo "url=$(jq -r .url <<<"$CFG")"
           } >> "$GITHUB_OUTPUT"
 
       # nginxとappの2コンテナ分のimageを、同じコミットのものへ差し替える
@@ -361,6 +362,7 @@ jobs:
         env:
           CLUSTER: ${{ steps.cfg.outputs.cluster }}
           SERVICE: ${{ steps.cfg.outputs.service }}
+          APP_URL: ${{ steps.cfg.outputs.url }}
         run: |
           set -uo pipefail
 
@@ -371,6 +373,6 @@ jobs:
           {
             echo "### デプロイ完了 :ship:"
             echo ""
-            echo "- URL: https://alb-larabel.sukunahikona.org"
+            echo "- URL: ${APP_URL}"
             echo "- イメージタグ: \`${{ needs.build.outputs.image_tag }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
