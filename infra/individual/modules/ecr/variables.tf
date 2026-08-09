@@ -9,11 +9,10 @@ variable "environment" {
 }
 
 variable "ecr" {
-  description = "ECR repository configuration"
-  type = object({
-    repository_name      = string
+  description = "ECR repositories（キーがリポジトリ名の接尾辞になる）"
+  type = map(object({
     image_tag_mutability = string # MUTABLE or IMMUTABLE
     keep_image_count     = number
     force_delete         = bool
-  })
+  }))
 }

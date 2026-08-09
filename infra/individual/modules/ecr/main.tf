@@ -1,14 +1,18 @@
 ###############################################################################
 # ECR Repository
+#
+# アプリ(php-fpm)とnginxで別リポジトリを使うため for_each で複数作る。
 ###############################################################################
 resource "aws_ecr_repository" "this" {
-  name = "${var.project}-${var.environment}-${var.ecr.repository_name}"
+  for_each = var.ecr
+
+  name = "${var.project}-${var.environment}-${each.key}"
 
   # MUTABLE: gitのSHAタグに加えてlatestタグも更新するため。
   # SHAタグのみ運用に切り替えるならIMMUTABLEの方が安全
-  image_tag_mutability = var.ecr.image_tag_mutability
+  image_tag_mutability = each.value.image_tag_mutability
 
-  force_delete = var.ecr.force_delete
+  force_delete = each.value.force_delete
 
   image_scanning_configuration {
     scan_on_push = true
@@ -19,7 +23,7 @@ resource "aws_ecr_repository" "this" {
   }
 
   tags = {
-    Name = "${var.project}-${var.environment}-${var.ecr.repository_name}"
+    Name = "${var.project}-${var.environment}-${each.key}"
   }
 }
 
@@ -30,7 +34,9 @@ resource "aws_ecr_repository" "this" {
 # 古いものを自動削除する
 ###############################################################################
 resource "aws_ecr_lifecycle_policy" "this" {
-  repository = aws_ecr_repository.this.name
+  for_each = var.ecr
+
+  repository = aws_ecr_repository.this[each.key].name
 
   policy = jsonencode({
     rules = [
@@ -49,11 +55,11 @@ resource "aws_ecr_lifecycle_policy" "this" {
       },
       {
         rulePriority = 2
-        description  = "直近${var.ecr.keep_image_count}世代のみ保持"
+        description  = "直近${each.value.keep_image_count}世代のみ保持"
         selection = {
           tagStatus   = "any"
           countType   = "imageCountMoreThan"
-          countNumber = var.ecr.keep_image_count
+          countNumber = each.value.keep_image_count
         }
         action = {
           type = "expire"

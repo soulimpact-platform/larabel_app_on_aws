@@ -18,6 +18,12 @@ variable "state_bucket_name" {
   type        = string
 }
 
+variable "app_key" {
+  description = "Laravel APP_KEY（php artisan key:generate --show の出力）"
+  type        = string
+  sensitive   = true
+}
+
 variable "db_credentials" {
   description = "RDS database credentials (db_name / username / password)"
   type = object({

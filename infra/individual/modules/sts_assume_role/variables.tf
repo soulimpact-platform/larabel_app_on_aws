@@ -30,9 +30,10 @@ variable "ecr_repository_arns" {
 }
 
 variable "ecs" {
-  description = "migrateタスク実行を許可するための情報"
+  description = "migrate実行とWebデプロイを許可するための情報"
   type = object({
     cluster_arn              = string
+    service_arns             = list(string)
     task_role_arns           = list(string)
     log_group_arn            = string
     ssm_parameter_arn_prefix = string

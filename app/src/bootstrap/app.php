@@ -16,6 +16,12 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'admin' => EnsureUserIsAdmin::class,
         ]);
+
+        // ALBがTLSを終端するため、アプリにはHTTPで到達する。
+        // X-Forwarded-Proto を信頼しないとLaravelがhttpのURLを生成してしまい、
+        // 混在コンテンツやリダイレクトループの原因になる。
+        // 送信元はALBのみ（タスクへ直接到達できないSG構成）のため at: '*' で問題ない。
+        $middleware->trustProxies(at: '*');
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

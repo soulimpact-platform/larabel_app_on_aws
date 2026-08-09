@@ -1,0 +1,32 @@
+# nginx公式イメージのテンプレート機構を利用している。
+# 起動時に /etc/nginx/templates/*.template が envsubst で展開され、
+# /etc/nginx/conf.d/ へ出力される。
+#
+# 置換されるのは環境変数として定義された名前だけなので、
+# $uri や $document_root などnginxの変数はそのまま残る。
+#
+# FASTCGI_PASS の値で接続先が変わる:
+#   ローカル(docker-compose) : php:9000        別コンテナをサービス名で解決
+#   ECS(awsvpc)              : 127.0.0.1:9000  同一タスク内でlocalhostを共有
+server {
+    listen 80;
+    server_name localhost;
+    root /var/www/html/public;
+
+    index index.php index.html;
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location ~ \.php$ {
+        fastcgi_pass ${FASTCGI_PASS};
+        fastcgi_index index.php;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        include fastcgi_params;
+    }
+
+    location ~ /\.ht {
+        deny all;
+    }
+}

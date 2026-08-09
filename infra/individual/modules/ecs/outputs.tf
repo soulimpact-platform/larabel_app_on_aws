@@ -8,19 +8,19 @@ output "cluster_arn" {
   value       = aws_ecs_cluster.this.arn
 }
 
-output "migrate_task_definition_family" {
-  description = "migrate用タスク定義のファミリー名（CIはこれを基に新リビジョンを登録する）"
-  value       = aws_ecs_task_definition.migrate.family
-}
-
-output "container_name" {
-  description = "コンテナ名（CIがimageを差し替える対象）"
-  value       = var.ecs.container_name
-}
-
 output "migrate_runtime_parameter_name" {
-  description = "migrate実行に必要な値（クラスタ名・タスク定義・ネットワーク構成等）を格納したSSMパラメータ名"
+  description = "migrate実行に必要な値を格納したSSMパラメータ名"
   value       = aws_ssm_parameter.migrate_runtime.name
+}
+
+output "web_runtime_parameter_name" {
+  description = "Webデプロイに必要な値を格納したSSMパラメータ名"
+  value       = aws_ssm_parameter.web_runtime.name
+}
+
+output "web_service_name" {
+  description = "ECSサービス名"
+  value       = aws_ecs_service.web.name
 }
 
 output "log_group_name" {
@@ -34,8 +34,13 @@ output "log_group_arn" {
 }
 
 output "task_role_arns" {
-  description = "run-task時にiam:PassRoleが必要となるロール"
+  description = "run-task / update-service 時に iam:PassRole が必要となるロール"
   value       = [aws_iam_role.task_execution.arn, aws_iam_role.task.arn]
+}
+
+output "service_arns" {
+  description = "CIが更新を許可されるECSサービスのARN"
+  value       = [aws_ecs_service.web.id]
 }
 
 output "ssm_parameter_arn_prefix" {
