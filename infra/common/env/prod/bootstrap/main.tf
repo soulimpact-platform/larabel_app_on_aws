@@ -59,5 +59,15 @@ module "ssm_parameter" {
       type        = "SecureString"
       description = "RDS database password"
     }
+
+    # CloudWatchアラートの通知先。パブリックリポジトリのため
+    # コードには実アドレスを書かず、apply後にCLIで上書きする:
+    #   aws ssm put-parameter --name /larabel-app/prod/monitoring/alert_email \
+    #     --value 'you@example.com' --type String --overwrite
+    "monitoring/alert_email" = {
+      value       = var.alert_email
+      type        = "String"
+      description = "CloudWatch alert notification email"
+    }
   }
 }

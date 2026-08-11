@@ -1,21 +1,26 @@
+###############################################################################
+# prod環境の設定
+#
+# ここに書くのは次の2種類だけ:
+#   ① 環境固有の値（project / dns / github など）
+#   ② モジュールの既定値から意図的に外している値（必ず理由をコメントする）
+#
+# それ以外はモジュール側の既定値を使う。既定値の定義は
+#   ../../modules/<name>/variables.tf
+# を参照。
+###############################################################################
+
 project     = "larabel-app"
 environment = "prod"
 region      = "ap-northeast-1"
 
-# ECRモジュールの設定（キーがリポジトリ名の接尾辞になる）
+# ECRリポジトリ（キーがリポジトリ名の接尾辞になる）
 #   app   → larabel-app-prod-app    php-fpm
 #   nginx → larabel-app-prod-nginx  リバースプロキシ
 ecr = {
-  app = {
-    image_tag_mutability = "MUTABLE" # latestタグを更新するため
-    keep_image_count     = 10
-    force_delete         = true # 検証中のためイメージが残っていても削除可能にする
-  }
-  nginx = {
-    image_tag_mutability = "MUTABLE"
-    keep_image_count     = 10
-    force_delete         = true
-  }
+  # 検証中のためイメージが残っていてもリポジトリを削除可能にする（既定: false）
+  app   = { force_delete = true }
+  nginx = { force_delete = true }
 }
 
 # GitHub ActionsがOIDCで引き受けるロールの設定
@@ -36,40 +41,16 @@ dns = {
   record_name = "alb-larabel" # → alb-larabel.sukunahikona.org
 }
 
-# ALBモジュールの設定
 alb = {
-  allowed_cidrs     = ["0.0.0.0/0"]
-  target_port       = 80
-  health_check_path = "/up" # Laravelが標準で用意するヘルスチェック経路
-
-  deregistration_delay = 30 # デプロイ時の切り替えを速くする
-  idle_timeout         = 60
-  ssl_policy           = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-
-  # 検証中のため削除しやすい設定。本運用時は true に変更すること
+  # 検証中のため削除保護を外している（既定: true）
   enable_deletion_protection = false
 }
 
-# ECSモジュールの設定
 ecs = {
-  container_name        = "app"
-  nginx_container_name  = "nginx"
-  log_retention_in_days = 30
-
-  # Privateサブネットに配置しNAT Gateway経由で外へ出るためfalse
-  assign_public_ip = false
-
-  migrate = {
-    cpu    = "512"  # 0.5 vCPU
-    memory = "1024" # 1GB
-  }
-
   web = {
-    cpu           = "512"  # 0.5 vCPU（nginx + php-fpm の合計）
-    memory        = "1024" # 1GB
-    desired_count = 1      # コスト優先。可用性が必要になったら2以上へ
-
-    # ALBのヘルスチェックが通るまでの猶予。Laravelの初回起動を待つ
-    health_check_grace_period_seconds = 60
+    # コスト優先で1台。可用性が必要になったら既定の2へ戻す（既定: 2）
+    desired_count = 1
   }
 }
+
+# monitoring は既定値のまま使用（5XX: 5件/5分、p95: 3秒）
