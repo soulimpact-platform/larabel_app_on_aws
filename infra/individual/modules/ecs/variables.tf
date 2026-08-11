@@ -57,24 +57,30 @@ variable "db" {
   })
 }
 
+# 既定値はここが唯一の置き場。呼び出し側は変えたい項目だけを書く。
+# 属性を省略した場合も null を明示した場合も、ここの既定値が適用される。
 variable "ecs" {
   description = "ECS configuration"
   type = object({
-    container_name        = string
-    nginx_container_name  = string
-    log_retention_in_days = number
-    assign_public_ip      = bool
+    container_name        = optional(string, "app")
+    nginx_container_name  = optional(string, "nginx")
+    log_retention_in_days = optional(number, 30)
+    # Privateサブネットに配置しNAT Gateway経由で外へ出るためfalse
+    assign_public_ip = optional(bool, false)
 
-    migrate = object({
-      cpu    = string
-      memory = string
-    })
+    migrate = optional(object({
+      cpu    = optional(string, "512")  # 0.5 vCPU
+      memory = optional(string, "1024") # 1GB
+    }), {})
 
-    web = object({
-      cpu                               = string
-      memory                            = string
-      desired_count                     = number
-      health_check_grace_period_seconds = number
-    })
+    web = optional(object({
+      cpu    = optional(string, "512")  # 0.5 vCPU（nginx + php-fpm の合計）
+      memory = optional(string, "1024") # 1GB
+      # 既定は2。可用性のため冗長化する側を既定にする
+      desired_count = optional(number, 2)
+      # ALBのヘルスチェックが通るまでの猶予。Laravelの初回起動を待つ
+      health_check_grace_period_seconds = optional(number, 60)
+    }), {})
   })
+  default = {}
 }

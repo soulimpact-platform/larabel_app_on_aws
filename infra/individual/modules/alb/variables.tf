@@ -26,15 +26,21 @@ variable "dns" {
   })
 }
 
+# 既定値はここが唯一の置き場。呼び出し側は変えたい項目だけを書く。
+# 属性を省略した場合も null を明示した場合も、ここの既定値が適用される。
 variable "alb" {
   description = "ALB configuration"
   type = object({
-    allowed_cidrs              = list(string)
-    target_port                = number
-    health_check_path          = string
-    deregistration_delay       = number
-    idle_timeout               = number
-    enable_deletion_protection = bool
-    ssl_policy                 = string
+    allowed_cidrs = optional(list(string), ["0.0.0.0/0"])
+    target_port   = optional(number, 80)
+    # Laravelが標準で用意するヘルスチェック経路
+    health_check_path = optional(string, "/up")
+    # デプロイ時の切り替えを速くするため短めにする
+    deregistration_delay = optional(number, 30)
+    idle_timeout         = optional(number, 60)
+    ssl_policy           = optional(string, "ELBSecurityPolicy-TLS13-1-2-2021-06")
+    # 既定は安全側。検証環境で外したい場合のみtfvarsで明示的にfalseにする
+    enable_deletion_protection = optional(bool, true)
   })
+  default = {}
 }

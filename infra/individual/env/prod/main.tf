@@ -87,6 +87,23 @@ module "ecs" {
   }
 }
 
+# 監視。アラームの定義のみを持ち、通知先トピックはcommon側のものを使う。
+# トピックをcommonに置いているのは、メール購読の確認を一度で済ませるため
+module "monitoring" {
+  source = "../../modules/monitoring"
+
+  project     = var.project
+  environment = var.environment
+  monitoring  = var.monitoring
+
+  alert_topic_arn = data.terraform_remote_state.common.outputs.alert_topic_arn
+
+  alb = {
+    arn_suffix              = module.alb.arn_suffix
+    target_group_arn_suffix = module.alb.target_group_arn_suffix
+  }
+}
+
 module "sts_assume_role" {
   source = "../../modules/sts_assume_role"
 

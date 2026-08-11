@@ -24,6 +24,11 @@ variable "app_key" {
   sensitive   = true
 }
 
+variable "alert_email" {
+  description = "CloudWatchアラートの通知先メールアドレス（実値はSSMへCLIで設定する）"
+  type        = string
+}
+
 variable "db_credentials" {
   description = "RDS database credentials (db_name / username / password)"
   type = object({
