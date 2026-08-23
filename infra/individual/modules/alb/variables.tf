@@ -44,3 +44,29 @@ variable "alb" {
   })
   default = {}
 }
+
+variable "cloudfront" {
+  description = <<-EOT
+    CloudFront経由の通信を識別するための設定。
+
+    origin_verify_header_value が空のあいだはリスナールールを作らず、
+    従来どおり全パスを既定アクションで転送する（CloudFront導入前の状態）。
+  EOT
+  type = object({
+    # CloudFrontがオリジンへ付与する秘密ヘッダの値
+    origin_verify_header_value = optional(string, "")
+
+    # CloudFront経由でのみ到達を許すパス。
+    # ALBのパス条件は1つの条件に最大5個までしか書けない点に注意
+    partner_path_patterns = optional(list(string), ["/partner/*"])
+
+    # CloudFront経由の通信が併せて必要とする静的アセット。
+    # これを許可しないとパートナー画面のCSS/JSが403になる
+    shared_asset_path_patterns = optional(list(string), ["/build/*", "/favicon.ico", "/robots.txt"])
+
+    # パートナー向けの公開ドメイン。認可には使わないが、
+    # ルールの意図を読めるようにするため条件に含める
+    partner_host = optional(string, "")
+  })
+  default = {}
+}
