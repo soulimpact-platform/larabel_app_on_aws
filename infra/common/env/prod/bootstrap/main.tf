@@ -79,35 +79,6 @@ module "ssm_parameter" {
     # 実値はapply後にCLIで設定する:
     #   aws ssm put-parameter --name /larabel-app/prod/cloudfront/origin_verify \
     #     --value "$(openssl rand -base64 32)" --type SecureString --overwrite
-    # 初期の社内管理者アカウント。
-    #
-    # 本番のmigrateタスクは --seed を実行しないため、DatabaseSeederが作る
-    # admin@example.com は本番には存在しない。代わりにCIから
-    # `php artisan app:create-admin-user` を一度だけ実行して発行する。
-    #
-    # 実値はapply後にCLIで設定する:
-    #   aws ssm put-parameter --name /larabel-app/prod/app/admin_email \
-    #     --value 'owner@example.com' --type String --overwrite
-    #   aws ssm put-parameter --name /larabel-app/prod/app/admin_password \
-    #     --value "$(openssl rand -base64 24)" --type SecureString --overwrite
-    "app/admin_email" = {
-      value       = var.admin_email
-      type        = "String"
-      description = "Initial admin user email"
-    }
-
-    "app/admin_name" = {
-      value       = var.admin_name
-      type        = "String"
-      description = "Initial admin user display name"
-    }
-
-    "app/admin_password" = {
-      value       = var.admin_password
-      type        = "SecureString"
-      description = "Initial admin user password"
-    }
-
     "cloudfront/origin_verify" = {
       value       = var.cloudfront_origin_verify
       type        = "SecureString"

@@ -13,7 +13,8 @@ use Illuminate\Support\Facades\Validator;
  * DatabaseSeeder が作る admin@example.com / password を本番へ流すと、
  * 公開環境に既知の認証情報が置かれてしまうため。
  *
- * 代わりに、認証情報をSSMから受け取るこのコマンドをCIから一度だけ実行する。
+ * 代わりに、認証情報を環境変数で受け取るこのコマンドをCIから一度だけ実行する。
+ * 値はGitHub Secretsに置き、run-task の overrides で注入される。
  * 以降のアカウント（社内ユーザー・パートナー企業・担当者）は、
  * ここで作った管理者が画面から発行する運用。
  *
@@ -24,7 +25,7 @@ class CreateAdminUser extends Command
     protected $signature = 'app:create-admin-user
                             {--force-password : 既存アカウントのパスワードも上書きする}';
 
-    protected $description = '初期の社内管理者アカウントを作成する（SSM由来の認証情報を使用）';
+    protected $description = '初期の社内管理者アカウントを作成する（認証情報は環境変数から受け取る）';
 
     public function handle(): int
     {
@@ -43,7 +44,7 @@ class CreateAdminUser extends Command
         ]);
 
         if ($validator->fails()) {
-            $this->error('初期管理者の設定が不正です。SSMパラメータを確認してください:');
+            $this->error('初期管理者の設定が不正です。INITIAL_ADMIN_* の環境変数を確認してください:');
 
             foreach ($validator->errors()->all() as $message) {
                 $this->line('  - '.$message);

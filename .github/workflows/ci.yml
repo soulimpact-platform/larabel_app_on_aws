@@ -362,14 +362,37 @@ jobs:
           CLUSTER: ${{ steps.cfg.outputs.cluster }}
           CONTAINER: ${{ steps.cfg.outputs.container }}
           NETWORK_CONFIG: ${{ steps.cfg.outputs.network }}
+          # 認証情報はリポジトリのSecretsから受け取る。
+          # パブリックリポジトリでもSecretsは非公開で、ログにも自動でマスクされる。
+          # SSMを使わないため、この機能のためのTerraform applyが不要になる
+          ADMIN_EMAIL: ${{ secrets.INITIAL_ADMIN_EMAIL }}
+          ADMIN_NAME: ${{ secrets.INITIAL_ADMIN_NAME }}
+          ADMIN_PASSWORD: ${{ secrets.INITIAL_ADMIN_PASSWORD }}
         run: |
           set -euo pipefail
 
-          # コマンドだけを差し替える。認証情報はタスク定義のsecrets経由で
-          # SSMから解決されるため、ここには平文が現れない
-          OVERRIDES=$(jq -nc --arg NAME "$CONTAINER" '{
+          if [ -z "$ADMIN_EMAIL" ] || [ -z "$ADMIN_PASSWORD" ]; then
+            echo "::error::INITIAL_ADMIN_EMAIL / INITIAL_ADMIN_PASSWORD がSecretsに登録されていません"
+            exit 1
+          fi
+
+          # コマンドと環境変数を run-task 時に差し替える。
+          # jq --arg で組み立てることで、秘密値をコマンドライン引数に置かない
+          OVERRIDES=$(jq -nc \
+            --arg NAME  "$CONTAINER" \
+            --arg EMAIL "$ADMIN_EMAIL" \
+            --arg ANAME "$ADMIN_NAME" \
+            --arg PASS  "$ADMIN_PASSWORD" '{
             containerOverrides: [
-              { name: $NAME, command: ["php", "artisan", "app:create-admin-user"] }
+              {
+                name: $NAME,
+                command: ["php", "artisan", "app:create-admin-user"],
+                environment: [
+                  { name: "INITIAL_ADMIN_EMAIL",    value: $EMAIL },
+                  { name: "INITIAL_ADMIN_NAME",     value: $ANAME },
+                  { name: "INITIAL_ADMIN_PASSWORD", value: $PASS  }
+                ]
+              }
             ]
           }')
 

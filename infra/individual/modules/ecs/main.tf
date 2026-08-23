@@ -159,7 +159,6 @@ resource "aws_ecs_task_definition" "migrate" {
       log_group      = aws_cloudwatch_log_group.this.name
       region         = data.aws_region.current.name
       ssm_rds_prefix = local.ssm_rds_prefix
-      ssm_app_prefix = local.ssm_app_prefix
     }
   )
 

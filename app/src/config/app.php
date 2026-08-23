@@ -20,9 +20,10 @@ return [
     | 初期管理者アカウント
     |--------------------------------------------------------------------------
     |
-    | app:create-admin-user コマンドが参照する。値はECSタスクにSSMから
-    | 注入される。env() を直接読まず config を経由するのは、将来
-    | config:cache を有効にしても壊れないようにするため。
+    | app:create-admin-user コマンドが参照する。値はGitHub Secretsに置き、
+    | CIが run-task の overrides で環境変数として注入する。
+    | env() を直接読まず config を経由するのは、将来 config:cache を
+    | 有効にしても壊れないようにするため。
     |
     */
 

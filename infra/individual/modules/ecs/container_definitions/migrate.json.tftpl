@@ -16,14 +16,10 @@
     ],
 
     "//secrets": "値はタスク起動時にSSMから解決される。タスク定義にもCIにも平文が現れない",
-    "//admin": "INITIAL_ADMIN_* は app:create-admin-user が参照する。migrate本体では使わないが、run-taskでコマンドを上書きして同じタスク定義を流用するため常に注入する",
     "secrets": [
       { "name": "DB_DATABASE", "valueFrom": "${ssm_rds_prefix}/db_name" },
       { "name": "DB_USERNAME", "valueFrom": "${ssm_rds_prefix}/username" },
-      { "name": "DB_PASSWORD", "valueFrom": "${ssm_rds_prefix}/password" },
-      { "name": "INITIAL_ADMIN_EMAIL", "valueFrom": "${ssm_app_prefix}/admin_email" },
-      { "name": "INITIAL_ADMIN_NAME", "valueFrom": "${ssm_app_prefix}/admin_name" },
-      { "name": "INITIAL_ADMIN_PASSWORD", "valueFrom": "${ssm_app_prefix}/admin_password" }
+      { "name": "DB_PASSWORD", "valueFrom": "${ssm_rds_prefix}/password" }
     ],
 
     "logConfiguration": {

@@ -29,12 +29,3 @@ db_credentials = {
 #   aws ssm put-parameter --name /larabel-app/prod/cloudfront/origin_verify \
 #     --value "$(openssl rand -base64 32)" --type SecureString --overwrite
 cloudfront_origin_verify = "dummy"
-
-# 初期の社内管理者アカウント。実値はapply後にCLIで上書きする:
-#   aws ssm put-parameter --name /larabel-app/prod/app/admin_email \
-#     --value 'owner@example.com' --type String --overwrite
-#   aws ssm put-parameter --name /larabel-app/prod/app/admin_password \
-#     --value "$(openssl rand -base64 24)" --type SecureString --overwrite
-admin_email    = "admin@example.com"
-admin_name     = "Administrator"
-admin_password = "dummy"

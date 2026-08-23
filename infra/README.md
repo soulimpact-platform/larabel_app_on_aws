@@ -506,13 +506,6 @@ aws ssm put-parameter --region $REGION --name $PREFIX/monitoring/alert_email \
 aws ssm put-parameter --region $REGION --name $PREFIX/cloudfront/origin_verify \
   --value "$(openssl rand -base64 32)" --type SecureString --overwrite
 
-# 初期の社内管理者アカウント（パスワードは12文字以上）
-aws ssm put-parameter --region $REGION --name $PREFIX/app/admin_email \
-  --value 'owner@example.com' --type String --overwrite
-aws ssm put-parameter --region $REGION --name $PREFIX/app/admin_name \
-  --value '管理者' --type String --overwrite
-aws ssm put-parameter --region $REGION --name $PREFIX/app/admin_password \
-  --value "$(openssl rand -base64 24)" --type SecureString --overwrite
 ```
 
 投入後に `individual` を再 apply すると、CloudFront と ALB のリスナールールに
@@ -526,9 +519,6 @@ aws ssm put-parameter --region $REGION --name $PREFIX/app/admin_password \
 | `rds/password` | SecureString | DB接続に失敗する |
 | `monitoring/alert_email` | String | アラートの宛先が不正でメールが届かない |
 | `cloudfront/origin_verify` | SecureString | 秘密ヘッダが `dummy` になり、推測されうる |
-| `app/admin_email` | String | 初期管理者を作成できず、誰もログインできない |
-| `app/admin_name` | String | 同上 |
-| `app/admin_password` | SecureString | 同上（12文字未満だとコマンドが失敗する） |
 
 ### 3. SNSの購読確認メールをクリックする
 
@@ -544,7 +534,28 @@ aws sns list-subscriptions-by-topic --region ap-northeast-1 \
 
 `SubscriptionArn` が `PendingConfirmation` ならメールを確認する。
 
-### 4. CI を `run_migrate` と `create_admin` にチェックを入れて実行する
+### 4. GitHub Secrets に初期管理者の認証情報を登録する
+
+`create_admin` ジョブが参照する。SSMではなくリポジトリのSecretsに置くのは、
+この機能のためだけに Terraform apply を2回走らせるのを避けるため。
+パブリックリポジトリでもSecretsは非公開で、ログにも自動でマスクされる。
+
+```bash
+gh secret set INITIAL_ADMIN_EMAIL --body 'owner@example.com'
+gh secret set INITIAL_ADMIN_NAME  --body '管理者'
+
+# パスワードは12文字以上。生成した値は手元に控えること
+# （Secretsは書き込み専用で、登録後に読み出せない）
+PW=$(openssl rand -base64 24); echo "$PW"
+gh secret set INITIAL_ADMIN_PASSWORD --body "$PW"
+```
+
+ブラウザからは Settings > Secrets and variables > Actions で登録する。
+
+値は `run-task` の `--overrides` で環境変数としてコンテナへ渡る。
+タスク定義にもリポジトリにも平文が現れない。
+
+### 5. CI を `run_migrate` と `create_admin` にチェックを入れて実行する
 
 `individual` を作り直すと **ECR が空・RDS も空**になる。
 `run_migrate` を付けずに実行するとイメージは push されるがマイグレーションが走らず、
@@ -572,7 +583,7 @@ migrate と同じタスク定義を `run-task --overrides` でコマンドだけ
 /admin/partner-companies/{id}/edit 担当者アカウントの発行（先方へ渡す）
 ```
 
-### 5. 動作確認
+### 6. 動作確認
 
 ```bash
 # 社内向け（許可IPから）
