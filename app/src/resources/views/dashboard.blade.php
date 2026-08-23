@@ -11,7 +11,7 @@
                 <div class="p-6 text-gray-900">
                     {{ __("You're logged in!") }}
                     <p class="mt-2 text-sm text-gray-600">
-                        {{ Auth::user()->name }} ({{ Auth::user()->email }}) / role: {{ Auth::user()->role }}
+                        {{ Auth::user()->name }} ({{ Auth::user()->email }})
                     </p>
                 </div>
             </div>

@@ -32,7 +32,6 @@
                         <tr>
                             <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">{{ __('Name') }}</th>
                             <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">{{ __('Email') }}</th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">{{ __('Role') }}</th>
                             <th class="px-4 py-2"></th>
                         </tr>
                     </thead>
@@ -41,7 +40,6 @@
                             <tr>
                                 <td class="px-4 py-2">{{ $user->name }}</td>
                                 <td class="px-4 py-2">{{ $user->email }}</td>
-                                <td class="px-4 py-2">{{ $user->role }}</td>
                                 <td class="px-4 py-2 text-right space-x-2">
                                     @if ($user->id === Auth::id())
                                         <span class="text-sm text-gray-400">{{ __('(You)') }}</span>
