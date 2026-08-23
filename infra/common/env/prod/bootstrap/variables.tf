@@ -44,3 +44,19 @@ variable "cloudfront_origin_verify" {
   type        = string
   sensitive   = true
 }
+
+variable "admin_email" {
+  description = "初期管理者のメールアドレス（実値はSSMへCLIで設定する）"
+  type        = string
+}
+
+variable "admin_name" {
+  description = "初期管理者の表示名（実値はSSMへCLIで設定する）"
+  type        = string
+}
+
+variable "admin_password" {
+  description = "初期管理者のパスワード（実値はSSMへCLIで設定する）"
+  type        = string
+  sensitive   = true
+}
