@@ -69,5 +69,20 @@ module "ssm_parameter" {
       type        = "String"
       description = "CloudWatch alert notification email"
     }
+
+    # CloudFrontがオリジン(ALB)へ付与する秘密ヘッダの値。
+    #
+    # ALBのリスナールールがこの値を検証し、CloudFront経由でない
+    # /partner/* へのアクセスを403で拒否する。Hostヘッダは詐称できるため
+    # 「自分のCloudFrontから来た」ことを示せるのはこの秘密値だけ。
+    #
+    # 実値はapply後にCLIで設定する:
+    #   aws ssm put-parameter --name /larabel-app/prod/cloudfront/origin_verify \
+    #     --value "$(openssl rand -base64 32)" --type SecureString --overwrite
+    "cloudfront/origin_verify" = {
+      value       = var.cloudfront_origin_verify
+      type        = "SecureString"
+      description = "Shared secret header value between CloudFront and ALB"
+    }
   }
 }

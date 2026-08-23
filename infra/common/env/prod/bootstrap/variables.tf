@@ -38,3 +38,9 @@ variable "db_credentials" {
   })
   sensitive = true
 }
+
+variable "cloudfront_origin_verify" {
+  description = "CloudFront→ALBの秘密ヘッダ値（実値はSSMへCLIで設定する）"
+  type        = string
+  sensitive   = true
+}

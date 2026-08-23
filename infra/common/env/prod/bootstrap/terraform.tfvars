@@ -24,3 +24,8 @@ db_credentials = {
   username = "dummy"
   password = "dummy"
 }
+
+# CloudFront→ALBの秘密ヘッダ。実値はapply後にCLIで上書きする:
+#   aws ssm put-parameter --name /larabel-app/prod/cloudfront/origin_verify \
+#     --value "$(openssl rand -base64 32)" --type SecureString --overwrite
+cloudfront_origin_verify = "dummy"

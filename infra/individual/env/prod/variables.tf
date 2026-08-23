@@ -46,8 +46,21 @@ variable "dns" {
   description = "公開ドメインの設定（ホストゾーンは既存のものを参照する）"
   type = object({
     zone_name   = string
-    record_name = string
+    record_name = string # 社内向け。ALBを直接指す
+    # 社外パートナー向け。CloudFrontを指す。
+    # 未設定ならCloudFrontを作らない（導入前の状態）
+    partner_record_name = optional(string)
   })
+}
+
+variable "cloudfront" {
+  description = "CloudFrontの設定"
+  type = object({
+    price_class              = optional(string)
+    origin_ssl_protocols     = optional(list(string))
+    minimum_protocol_version = optional(string)
+  })
+  default = {}
 }
 
 variable "alb" {
@@ -94,6 +107,21 @@ variable "ecs" {
       desired_count                     = optional(number)
       health_check_grace_period_seconds = optional(number)
     }))
+  })
+  default = {}
+}
+
+variable "waf" {
+  description = "WAFの設定"
+  type = object({
+    scope                 = optional(string)
+    count_only            = optional(bool)
+    managed_rule_groups   = optional(list(string))
+    rate_limit            = optional(number)
+    log_retention_in_days = optional(number)
+    log_all_requests      = optional(bool)
+    allowed_ip_cidrs      = optional(list(string))
+    public_path_regexes   = optional(list(string))
   })
   default = {}
 }
