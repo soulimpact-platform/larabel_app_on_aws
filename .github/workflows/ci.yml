@@ -17,6 +17,10 @@ on:
         description: "DBマイグレーションを実行する（チェックしない場合はビルドとデプロイのみ）"
         type: boolean
         default: false
+      create_admin:
+        description: "初期の社内管理者アカウントを作成する（初回構築時のみ。冪等）"
+        type: boolean
+        default: false
 
 # 同じブランチの実行が重ならないようにする
 concurrency:
@@ -266,6 +270,155 @@ jobs:
           echo "終了コード: $EXIT_CODE"
           if [ "$EXIT_CODE" != "0" ]; then
             echo "::error::マイグレーションが失敗しました（終了コード ${EXIT_CODE}）"
+            exit 1
+          fi
+
+  ###########################################################################
+  # 初期の社内管理者アカウント作成
+  #
+  # 本番のmigrateタスクは --seed を実行しないため、DatabaseSeederが作る
+  # admin@example.com は本番に存在しない。既知の認証情報を公開環境へ
+  # 置かないための意図的な設計。
+  #
+  # 代わりに、認証情報をSSMから受け取る app:create-admin-user を
+  # 初回構築時に一度だけ実行する。コマンドは冪等なので再実行しても安全。
+  #
+  # migrateと同じタスク定義を run-task の overrides でコマンドだけ
+  # 差し替えて流用する。ネットワーク構成もSSM由来の値もそのまま使えるため
+  #
+  # 以降のアカウント（社内ユーザー・パートナー企業・担当者）は、
+  # ここで作った管理者が画面から発行する
+  ###########################################################################
+  create_admin:
+    name: Create initial admin user
+    needs: [build, migrate]
+    # migrateがスキップでも進むが、失敗した場合は止める（テーブルが無い可能性）
+    if: ${{ !cancelled() && inputs.create_admin && needs.build.result == 'success' && needs.migrate.result != 'failure' }}
+    runs-on: ubuntu-latest
+
+    # 管理者アカウントの発行は権限的に重いため、migrateと同じ承認ゲートを通す
+    environment: app-prod-migrate
+
+    steps:
+      - name: AWSへOIDCで認証
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: 実行パラメータを取得
+        id: cfg
+        run: |
+          set -euo pipefail
+
+          CFG=$(aws ssm get-parameter \
+            --name "$ECS_MIGRATE_PARAM" \
+            --query Parameter.Value --output text)
+
+          {
+            echo "cluster=$(jq -r .cluster <<<"$CFG")"
+            echo "family=$(jq -r .taskDefinitionFamily <<<"$CFG")"
+            echo "container=$(jq -r .containerName <<<"$CFG")"
+            echo "log_group=$(jq -r .logGroup <<<"$CFG")"
+            echo "network=$(jq -c .networkConfiguration <<<"$CFG")"
+          } >> "$GITHUB_OUTPUT"
+
+      # migrateジョブがスキップされている場合もあるため、ここでも
+      # 最新イメージを指すリビジョンを登録する
+      - name: タスク定義を新しいイメージで登録
+        id: taskdef
+        env:
+          IMAGE_URI: ${{ needs.build.outputs.app_image_uri }}
+          FAMILY: ${{ steps.cfg.outputs.family }}
+          CONTAINER: ${{ steps.cfg.outputs.container }}
+        run: |
+          set -euo pipefail
+
+          CURRENT=$(aws ecs describe-task-definition \
+            --task-definition "$FAMILY" \
+            --query taskDefinition)
+
+          NEW=$(echo "$CURRENT" | jq \
+            --arg IMAGE "$IMAGE_URI" \
+            --arg NAME "$CONTAINER" '
+              .containerDefinitions |= map(if .name == $NAME then .image = $IMAGE else . end)
+              | del(
+                  .taskDefinitionArn, .revision, .status, .requiresAttributes,
+                  .compatibilities, .registeredAt, .registeredBy
+                )
+            ')
+
+          ARN=$(aws ecs register-task-definition \
+            --cli-input-json "$NEW" \
+            --query taskDefinition.taskDefinitionArn --output text)
+
+          echo "リビジョンを登録しました: $ARN"
+          echo "arn=$ARN" >> "$GITHUB_OUTPUT"
+
+      - name: 管理者作成タスクを実行して完了まで待つ
+        id: run
+        env:
+          TASK_DEF_ARN: ${{ steps.taskdef.outputs.arn }}
+          CLUSTER: ${{ steps.cfg.outputs.cluster }}
+          CONTAINER: ${{ steps.cfg.outputs.container }}
+          NETWORK_CONFIG: ${{ steps.cfg.outputs.network }}
+        run: |
+          set -euo pipefail
+
+          # コマンドだけを差し替える。認証情報はタスク定義のsecrets経由で
+          # SSMから解決されるため、ここには平文が現れない
+          OVERRIDES=$(jq -nc --arg NAME "$CONTAINER" '{
+            containerOverrides: [
+              { name: $NAME, command: ["php", "artisan", "app:create-admin-user"] }
+            ]
+          }')
+
+          TASK_ARN=$(aws ecs run-task \
+            --cluster "$CLUSTER" \
+            --task-definition "$TASK_DEF_ARN" \
+            --launch-type FARGATE \
+            --network-configuration "$NETWORK_CONFIG" \
+            --overrides "$OVERRIDES" \
+            --started-by "gha-${GITHUB_RUN_ID}" \
+            --query 'tasks[0].taskArn' --output text)
+
+          echo "起動しました: $TASK_ARN"
+          echo "task_arn=$TASK_ARN" >> "$GITHUB_OUTPUT"
+          echo "task_id=${TASK_ARN##*/}" >> "$GITHUB_OUTPUT"
+
+          echo "完了を待機しています..."
+          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK_ARN"
+
+      # 成否にかかわらずログを出す。パスワードはログに出力しない実装のため安全
+      - name: 実行ログを表示
+        if: always() && steps.run.outputs.task_id != ''
+        env:
+          TASK_ID: ${{ steps.run.outputs.task_id }}
+          LOG_GROUP: ${{ steps.cfg.outputs.log_group }}
+          CONTAINER: ${{ steps.cfg.outputs.container }}
+        run: |
+          set -uo pipefail
+          aws logs get-log-events \
+            --log-group-name "$LOG_GROUP" \
+            --log-stream-name "migrate/${CONTAINER}/${TASK_ID}" \
+            --query 'events[].message' --output text || echo "ログをまだ取得できませんでした"
+
+      - name: 終了コードを判定
+        env:
+          TASK_ARN: ${{ steps.run.outputs.task_arn }}
+          CLUSTER: ${{ steps.cfg.outputs.cluster }}
+          CONTAINER: ${{ steps.cfg.outputs.container }}
+        run: |
+          set -euo pipefail
+
+          EXIT_CODE=$(aws ecs describe-tasks \
+            --cluster "$CLUSTER" --tasks "$TASK_ARN" \
+            --query "tasks[0].containers[?name=='${CONTAINER}'].exitCode | [0]" \
+            --output text)
+
+          echo "終了コード: $EXIT_CODE"
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "::error::管理者アカウントの作成に失敗しました（終了コード ${EXIT_CODE}）"
             exit 1
           fi
 

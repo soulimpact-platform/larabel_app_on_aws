@@ -505,6 +505,14 @@ aws ssm put-parameter --region $REGION --name $PREFIX/monitoring/alert_email \
 # CloudFront → ALB の秘密ヘッダ
 aws ssm put-parameter --region $REGION --name $PREFIX/cloudfront/origin_verify \
   --value "$(openssl rand -base64 32)" --type SecureString --overwrite
+
+# 初期の社内管理者アカウント（パスワードは12文字以上）
+aws ssm put-parameter --region $REGION --name $PREFIX/app/admin_email \
+  --value 'owner@example.com' --type String --overwrite
+aws ssm put-parameter --region $REGION --name $PREFIX/app/admin_name \
+  --value '管理者' --type String --overwrite
+aws ssm put-parameter --region $REGION --name $PREFIX/app/admin_password \
+  --value "$(openssl rand -base64 24)" --type SecureString --overwrite
 ```
 
 投入後に `individual` を再 apply すると、CloudFront と ALB のリスナールールに
@@ -518,6 +526,9 @@ aws ssm put-parameter --region $REGION --name $PREFIX/cloudfront/origin_verify \
 | `rds/password` | SecureString | DB接続に失敗する |
 | `monitoring/alert_email` | String | アラートの宛先が不正でメールが届かない |
 | `cloudfront/origin_verify` | SecureString | 秘密ヘッダが `dummy` になり、推測されうる |
+| `app/admin_email` | String | 初期管理者を作成できず、誰もログインできない |
+| `app/admin_name` | String | 同上 |
+| `app/admin_password` | SecureString | 同上（12文字未満だとコマンドが失敗する） |
 
 ### 3. SNSの購読確認メールをクリックする
 
@@ -533,11 +544,33 @@ aws sns list-subscriptions-by-topic --region ap-northeast-1 \
 
 `SubscriptionArn` が `PendingConfirmation` ならメールを確認する。
 
-### 4. CI を `run_migrate` にチェックを入れて実行する
+### 4. CI を `run_migrate` と `create_admin` にチェックを入れて実行する
 
 `individual` を作り直すと **ECR が空・RDS も空**になる。
 `run_migrate` を付けずに実行するとイメージは push されるがマイグレーションが走らず、
 タスクが起動できずに `healthy-host` アラームが鳴る。
+
+`create_admin` は初期の社内管理者を1件作る。
+**本番の migrate タスクは `--seed` を実行しない**ため、`DatabaseSeeder` が作る
+`admin@example.com` / `password` は本番に存在しない。既知の認証情報を公開環境へ
+置かないための意図的な設計。
+
+代わりに `php artisan app:create-admin-user` を CI から一度だけ実行する。
+認証情報は SSM の `app/admin_*` から ECS タスクの secrets 経由で注入されるため、
+**ワークフローにもタスク定義にも平文が現れない**。コマンドは冪等なので
+再実行しても新規作成はしない。
+
+migrate と同じタスク定義を `run-task --overrides` でコマンドだけ差し替えて流用している。
+承認ゲートも migrate と同じ `app-prod-migrate` 環境を通る。
+
+以降のアカウント（社内ユーザー・パートナー企業・担当者）は、
+**ここで作った管理者が画面から発行する**。CI を再実行する必要はない。
+
+```
+/admin/users                       社内ユーザーの追加
+/admin/partner-companies           パートナー企業の追加
+/admin/partner-companies/{id}/edit 担当者アカウントの発行（先方へ渡す）
+```
 
 ### 5. 動作確認
 
