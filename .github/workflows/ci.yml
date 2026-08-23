@@ -425,8 +425,16 @@ jobs:
   ###########################################################################
   # Webサービスのデプロイ
   #
-  # migrateが「スキップ」されても進むが、「失敗」した場合は止める。
-  # 旧スキーマのDBに新しいコードを載せる事故を防ぐため。
+  # 実行順序は build → migrate → create_admin → deploy。
+  # サービスが公開された時点でスキーマが最新かつ管理者が存在している状態にする。
+  #
+  # 停止条件は migrate の失敗のみ。
+  #   migrate 失敗 → 止める。旧スキーマのDBに新しいコードを載せると
+  #                  利用者に見えるエラーになるため
+  #   create_admin 失敗 → 止めない。失敗要因はSSMの設定漏れがほとんどで、
+  #                  アプリ自体は正常に動く。ここで止めるとアプリも無い状態に
+  #                  なり、かえって復旧しにくい。SSMを直して create_admin だけ
+  #                  再実行すればよい（冪等）
   #
   # ※ needs に指定したジョブがスキップされると依存側もスキップされるのが
   #   既定動作のため !cancelled() が必須。always() だとワークフローを
@@ -434,7 +442,7 @@ jobs:
   ###########################################################################
   deploy:
     name: Deploy web service
-    needs: [build, migrate]
+    needs: [build, migrate, create_admin]
     if: ${{ !cancelled() && needs.build.result == 'success' && needs.migrate.result != 'failure' }}
     runs-on: ubuntu-latest
 
