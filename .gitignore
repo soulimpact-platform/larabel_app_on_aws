@@ -13,3 +13,6 @@ terraform.rc
 
 # SSH秘密鍵（誤って生成された場合の保険）
 *.pem
+
+# Playwright MCP の出力（スクリーンショット・スナップショット）
+.playwright-mcp/
