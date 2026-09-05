@@ -20,6 +20,10 @@ locals {
   ip_restriction_enabled = length(var.waf.allowed_ip_cidrs) > 0
   public_paths_enabled   = length(var.waf.public_path_regexes) > 0
 
+  # CloudFront経由でのみ免除するパスの判定を行うか。
+  # パスの列挙と秘密値の両方が揃っている場合にのみ有効になる
+  cloudfront_paths_enabled = length(var.waf.cloudfront_path_regexes) > 0 && var.waf.origin_verify_header_value != ""
+
   # 免除対象を表す印。Web ACL直下のルールが付ける独自ラベルは
   # マネージドルールのような接頭辞が付かず、この名前のまま照合できる
   public_path_label = "public-path"
@@ -57,5 +61,25 @@ resource "aws_wafv2_regex_pattern_set" "public_paths" {
 
   tags = {
     Name = "${local.name}-public-paths"
+  }
+}
+
+resource "aws_wafv2_regex_pattern_set" "cloudfront_paths" {
+  count = local.cloudfront_paths_enabled ? 1 : 0
+
+  name = "${local.name}-cloudfront-paths"
+  # descriptionはWAFの制約でASCIIのみ
+  description = "URI paths served only through CloudFront"
+  scope       = var.waf.scope
+
+  dynamic "regular_expression" {
+    for_each = var.waf.cloudfront_path_regexes
+    content {
+      regex_string = regular_expression.value
+    }
+  }
+
+  tags = {
+    Name = "${local.name}-cloudfront-paths"
   }
 }

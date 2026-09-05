@@ -50,9 +50,22 @@ variable "waf" {
     # count_only とは独立に効く（様子見中でもIP制限だけは実際に遮断する）
     allowed_ip_cidrs = optional(list(string), [])
 
-    # IP制限を免除するパスの正規表現。allowed_ip_cidrs が空なら無関係。
-    # ヘルスチェックや静的アセットなど、誰からでも到達させたいものを列挙する
+    # 経路を問わずIP制限を免除するパス。
+    # 外形監視のように、CloudFrontも許可IPも経由せず到達するものを列挙する
     public_path_regexes = optional(list(string), [])
+
+    # CloudFront経由の場合にのみIP制限を免除するパス。
+    #
+    # ALBのリスナールールでも同じ判定を行っているが、WAFでも見ることで
+    #   - 直叩きの試行がWAFログに残る（リスナールールの403は記録されない）
+    #   - リスナールールが壊れてもIP制限が効く
+    # という2点を得る。秘密値はTerraformが同じSSMから両方へ配るため、
+    # 手動同期は発生しない
+    cloudfront_path_regexes = optional(list(string), [])
+
+    # CloudFrontがオリジンへ付与する秘密ヘッダの値。
+    # 空なら cloudfront_path_regexes の判定を行わない
+    origin_verify_header_value = optional(string, "")
 
     # ログの保持日数
     log_retention_in_days = optional(number, 30)

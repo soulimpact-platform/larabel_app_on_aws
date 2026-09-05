@@ -80,6 +80,76 @@ resource "aws_wafv2_web_acl" "this" {
     }
   }
 
+  # 優先度1: CloudFront経由の正規リクエストに印を付ける。
+  #
+  # 秘密ヘッダとパスの両方が一致した場合のみラベルを付ける。
+  # ALBのリスナールールと同じ判定を重ねることで、
+  #   - ALB直叩きの試行がWAFログに残る（リスナールールの403は記録されない）
+  #   - リスナールールが壊れてもIP制限が働く
+  # という2点を得る。値はTerraformが同じSSMから配るため手動同期は不要
+  dynamic "rule" {
+    for_each = local.cloudfront_paths_enabled ? [1] : []
+
+    content {
+      name     = "mark-cloudfront-origin"
+      priority = 1
+
+      action {
+        count {}
+      }
+
+      rule_label {
+        name = local.public_path_label
+      }
+
+      statement {
+        and_statement {
+          # 条件1: CloudFrontが付与する秘密ヘッダが一致する
+          statement {
+            byte_match_statement {
+              search_string         = var.waf.origin_verify_header_value
+              positional_constraint = "EXACTLY"
+
+              field_to_match {
+                single_header {
+                  name = "x-origin-verify"
+                }
+              }
+
+              text_transformation {
+                priority = 0
+                type     = "NONE"
+              }
+            }
+          }
+
+          # 条件2: CloudFrontが配信すべきパスである。
+          # これが無いとCF経由で /admin/* に到達できてしまう
+          statement {
+            regex_pattern_set_reference_statement {
+              arn = aws_wafv2_regex_pattern_set.cloudfront_paths[0].arn
+
+              field_to_match {
+                uri_path {}
+              }
+
+              text_transformation {
+                priority = 0
+                type     = "LOWERCASE"
+              }
+            }
+          }
+        }
+      }
+
+      visibility_config {
+        cloudwatch_metrics_enabled = true
+        metric_name                = "mark-cloudfront-origin"
+        sampled_requests_enabled   = true
+      }
+    }
+  }
+
   # 優先度1: 許可IPでなく、かつ印も付いていないものを遮断する。
   # block は終端するため、以降のマネージドルールは評価されない
   dynamic "rule" {
@@ -87,7 +157,7 @@ resource "aws_wafv2_web_acl" "this" {
 
     content {
       name     = "ip-restriction"
-      priority = 1
+      priority = 2
 
       action {
         block {}
