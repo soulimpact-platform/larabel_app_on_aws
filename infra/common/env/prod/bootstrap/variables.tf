@@ -44,3 +44,8 @@ variable "cloudfront_origin_verify" {
   type        = string
   sensitive   = true
 }
+
+variable "waf_allowed_ip_cidrs" {
+  description = "WAFのIP制限で許可する送信元CIDR（カンマ区切り。実値はSSMへCLIで設定する）"
+  type        = string
+}

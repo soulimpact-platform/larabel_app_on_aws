@@ -79,6 +79,23 @@ module "ssm_parameter" {
     # 実値はapply後にCLIで設定する:
     #   aws ssm put-parameter --name /larabel-app/prod/cloudfront/origin_verify \
     #     --value "$(openssl rand -base64 32)" --type SecureString --overwrite
+    # WAFのIP制限で許可する送信元。カンマ区切りのCIDR。
+    #
+    # パブリックリポジトリのため自宅IPをtfvarsに書かない。値を公開すると
+    # おおよその居住地域が分かり、スキャンの標的も特定されるため。
+    #
+    # 既定値は誰にも一致しないCIDR。投入し忘れた場合は「全員遮断」に倒れ、
+    # 気づかず開放されるより安全側になる。
+    #
+    # 実値はapply後にCLIで設定する:
+    #   aws ssm put-parameter --name /larabel-app/prod/waf/allowed_ip_cidrs \
+    #     --value "$(curl -s https://checkip.amazonaws.com)/32" --type String --overwrite
+    "waf/allowed_ip_cidrs" = {
+      value       = var.waf_allowed_ip_cidrs
+      type        = "String"
+      description = "Comma separated CIDRs allowed by the WAF IP restriction"
+    }
+
     "cloudfront/origin_verify" = {
       value       = var.cloudfront_origin_verify
       type        = "SecureString"

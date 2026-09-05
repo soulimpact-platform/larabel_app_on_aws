@@ -77,7 +77,9 @@ ecs = {
 #   J:COMの動的IPなので変わりうるが、締め出されてもAWS側の操作には影響しない。
 #   新しいIPはWAFのサンプリングされたリクエストで確認できる。
 waf = {
-  allowed_ip_cidrs = ["200.200.200.200/32"]
+  # allowed_ip_cidrs はここに書かない。
+  # 自宅IPを公開しないため、SSM /larabel-app/prod/waf/allowed_ip_cidrs から
+  # 取得している（main.tf を参照）
 
   # IP制限を免除するパス。uri_pathを小文字化してから照合される。
   # ドットは正規表現のメタ文字なのでエスケープする

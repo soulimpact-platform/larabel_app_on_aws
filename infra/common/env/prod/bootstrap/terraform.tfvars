@@ -29,3 +29,10 @@ db_credentials = {
 #   aws ssm put-parameter --name /larabel-app/prod/cloudfront/origin_verify \
 #     --value "$(openssl rand -base64 32)" --type SecureString --overwrite
 cloudfront_origin_verify = "dummy"
+
+# WAFのIP制限で許可する送信元。実値はapply後にCLIで上書きする:
+#   aws ssm put-parameter --name /larabel-app/prod/waf/allowed_ip_cidrs \
+#     --value "$(curl -s https://checkip.amazonaws.com)/32" --type String --overwrite
+#
+# 既定は誰にも一致しないCIDR。投入し忘れても「全員遮断」に倒れる
+waf_allowed_ip_cidrs = "200.200.200.200/32"

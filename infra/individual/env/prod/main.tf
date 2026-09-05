@@ -55,6 +55,17 @@ data "aws_ssm_parameter" "cloudfront_origin_verify" {
   name = "/${var.project}/${var.environment}/cloudfront/origin_verify"
 }
 
+###############################################################################
+# WAFのIP制限で許可する送信元
+#
+# パブリックリポジトリのためtfvarsには書かず、SSMから取得する。
+# 自宅IPを公開するとおおよその居住地域が分かり、標的も特定されるため。
+# IPが変わったときも put-parameter + apply だけで済み、コミットは不要。
+###############################################################################
+data "aws_ssm_parameter" "waf_allowed_ip_cidrs" {
+  name = "/${var.project}/${var.environment}/waf/allowed_ip_cidrs"
+}
+
 locals {
   # partner_record_name が未設定ならCloudFrontを作らない
   cloudfront_enabled = try(var.dns.partner_record_name, null) != null
@@ -119,6 +130,11 @@ module "waf" {
   # ALBのリスナールールと同じ値を参照するので、片方だけズレることはない
   waf = merge(var.waf, {
     origin_verify_header_value = local.origin_verify_header_value
+
+    # 許可IPもSSM由来。カンマ区切りの文字列をリストへ展開する
+    allowed_ip_cidrs = [
+      for cidr in split(",", data.aws_ssm_parameter.waf_allowed_ip_cidrs.value) : trimspace(cidr)
+    ]
   })
 
   alb_arn = module.alb.arn
