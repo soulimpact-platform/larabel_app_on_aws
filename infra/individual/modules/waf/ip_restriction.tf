@@ -27,6 +27,16 @@ locals {
   # 免除対象を表す印。Web ACL直下のルールが付ける独自ラベルは
   # マネージドルールのような接頭辞が付かず、この名前のまま照合できる
   public_path_label = "public-path"
+
+  # CloudFront経由であることを表す印。
+  # 送信元IPで判定するルールは、この印が付いた通信を評価対象から外す。
+  # ALBから見た送信元はCloudFrontのIPであり、判定しても無意味なうえ
+  # rate-limitに至っては全パートナーが合算されて巻き添え遮断になるため
+  cloudfront_origin_label = "cloudfront-origin"
+
+  # 送信元IPで判定するマネージドルール。CloudFront側のWeb ACLで
+  # 本物のクライアントIPを使って評価するので、ALB側では除外する
+  ip_based_managed_groups = ["AWSManagedRulesAmazonIpReputationList"]
 }
 
 resource "aws_wafv2_ip_set" "allowed" {

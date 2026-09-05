@@ -102,6 +102,11 @@ resource "aws_wafv2_web_acl" "this" {
         name = local.public_path_label
       }
 
+      # IPベースのルールから除外するための印
+      rule_label {
+        name = local.cloudfront_origin_label
+      }
+
       statement {
         and_statement {
           # 条件1: CloudFrontが付与する秘密ヘッダが一致する
@@ -228,6 +233,26 @@ resource "aws_wafv2_web_acl" "this" {
         managed_rule_group_statement {
           vendor_name = "AWS"
           name        = rule.key
+
+          # 送信元IPで判定するルールは、CloudFront経由の通信を評価しない。
+          # ALBから見た送信元はCloudFrontのIPで、判定しても意味がないため。
+          # 本物のクライアントIPでの評価はCloudFront側のWeb ACLが担う
+          dynamic "scope_down_statement" {
+            for_each = (
+              contains(local.ip_based_managed_groups, rule.key) && local.cloudfront_paths_enabled
+            ) ? [1] : []
+
+            content {
+              not_statement {
+                statement {
+                  label_match_statement {
+                    scope = "LABEL"
+                    key   = local.cloudfront_origin_label
+                  }
+                }
+              }
+            }
+          }
         }
       }
 
@@ -266,6 +291,24 @@ resource "aws_wafv2_web_acl" "this" {
       rate_based_statement {
         limit              = var.waf.rate_limit
         aggregate_key_type = "IP"
+
+        # CloudFront経由の通信を集計から外す。
+        # 外さないと全パートナーが同一IPに合算され、誰か1人が閾値を
+        # 超えた時点で全員が遮断される（BLOCK切替時の事故）
+        dynamic "scope_down_statement" {
+          for_each = local.cloudfront_paths_enabled ? [1] : []
+
+          content {
+            not_statement {
+              statement {
+                label_match_statement {
+                  scope = "LABEL"
+                  key   = local.cloudfront_origin_label
+                }
+              }
+            }
+          }
+        }
       }
     }
 
