@@ -88,6 +88,10 @@ waf = {
 
   public_path_regexes = [
     "^/status$", # 外形監視。CloudFrontも許可IPも経由せず到達する
+    # Viteのビルド成果物。/status が読むためCF経由に限定できない。
+    # 限定しても、CloudFront経由で全世界に公開されている以上は
+    # 守れるものが無い（ファイル名の列挙もCF経由で可能）
+    "^/build/",
     "^/favicon\\.ico$",
     "^/robots\\.txt$",
   ]
@@ -97,6 +101,5 @@ waf = {
   # ALBのリスナールールでも同じ判定をしており、二重に守っている
   cloudfront_path_regexes = [
     "^/partner/", # ログイン・プロフィール・フリーランス管理一式
-    "^/build/",   # Viteのビルド成果物。これが無いと画面が崩れる
   ]
 }
