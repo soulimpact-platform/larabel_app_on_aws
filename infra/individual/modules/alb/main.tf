@@ -114,9 +114,24 @@ resource "aws_lb" "this" {
   idle_timeout               = var.alb.idle_timeout
   enable_deletion_protection = var.alb.enable_deletion_protection
 
+  dynamic "access_logs" {
+    for_each = var.alb.access_logs_enabled ? [1] : []
+
+    content {
+      bucket = aws_s3_bucket.access_logs[0].id
+      prefix = var.alb.access_logs_prefix
+      # バケットポリシーが先に無いとALBの作成自体が失敗する
+      enabled = true
+    }
+  }
+
   tags = {
     Name = "${var.project}-${var.environment}-alb"
   }
+
+  # バケットポリシーが未設定のままALBを作ると、ログ配信の検証に失敗して
+  # ALBの作成自体がエラーになる。countが0のときは空リストになるため無害
+  depends_on = [aws_s3_bucket_policy.access_logs]
 }
 
 ###############################################################################

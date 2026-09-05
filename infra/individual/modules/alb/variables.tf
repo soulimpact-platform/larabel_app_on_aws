@@ -41,6 +41,11 @@ variable "alb" {
     ssl_policy           = optional(string, "ELBSecurityPolicy-TLS13-1-2-2021-06")
     # 既定は安全側。検証環境で外したい場合のみtfvarsで明示的にfalseにする
     enable_deletion_protection = optional(bool, true)
+
+    # アクセスログ。WAFログに残らないリスナールールの403も記録される
+    access_logs_enabled        = optional(bool, true)
+    access_logs_prefix         = optional(string, "alb")
+    access_logs_retention_days = optional(number, 30)
   })
   default = {}
 }
