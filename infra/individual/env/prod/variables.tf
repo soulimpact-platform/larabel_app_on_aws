@@ -130,3 +130,15 @@ variable "waf" {
   })
   default = {}
 }
+
+variable "waf_cloudfront" {
+  description = "CloudFront用Web ACLの設定（送信元IPで判定するルールのみ）"
+  type = object({
+    managed_rule_groups   = optional(list(string))
+    rate_limit            = optional(number)
+    count_only            = optional(bool)
+    log_retention_in_days = optional(number)
+    log_all_requests      = optional(bool)
+  })
+  default = {}
+}

@@ -98,3 +98,13 @@ output "cloudfront_distribution_id" {
   description = "CloudFrontディストリビューションID"
   value       = try(module.cloudfront[0].distribution_id, null)
 }
+
+output "cloudfront_web_acl_name" {
+  description = "CloudFront用Web ACL名（us-east-1）"
+  value       = try(module.waf_cloudfront[0].web_acl_name, null)
+}
+
+output "cloudfront_waf_log_group" {
+  description = "CloudFront用WAFログのロググループ名（us-east-1）"
+  value       = try(module.waf_cloudfront[0].log_group_name, null)
+}

@@ -27,6 +27,17 @@ variable "origin_domain_name" {
   type        = string
 }
 
+variable "web_acl_arn" {
+  description = <<-EOT
+    アタッチするWeb ACLのARN（CLOUDFRONTスコープ / us-east-1）。
+
+    空文字ならアタッチしない。ALB側のWeb ACLとは役割が異なり、
+    こちらは閲覧者の実IPで判定するルールだけを持つ。
+  EOT
+  type        = string
+  default     = ""
+}
+
 variable "origin_verify_header_value" {
   description = <<-EOT
     CloudFrontがオリジンへ付与する秘密ヘッダの値。
@@ -51,6 +62,10 @@ variable "cloudfront" {
 
     # 閲覧者との通信で許可する最小TLSバージョン
     minimum_protocol_version = optional(string, "TLSv1.2_2021")
+
+    # アクセスログ。閲覧者の実IPが記録される唯一の経路
+    access_logs_enabled        = optional(bool, true)
+    access_logs_retention_days = optional(number, 30)
   })
   default = {}
 }

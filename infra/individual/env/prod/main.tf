@@ -93,6 +93,23 @@ module "alb" {
   }
 }
 
+# CloudFront用のWeb ACL（us-east-1）。
+# 送信元IPで判定するルールはALB側からは正しく評価できないため、
+# 閲覧者の実IPが見えるCloudFront側に置く
+module "waf_cloudfront" {
+  source = "../../modules/waf_cloudfront"
+  count  = local.cloudfront_enabled ? 1 : 0
+
+  providers = {
+    aws           = aws
+    aws.us_east_1 = aws.us_east_1
+  }
+
+  project        = var.project
+  environment    = var.environment
+  waf_cloudfront = var.waf_cloudfront
+}
+
 # パートナー向けの公開経路。ALBの手前に置き、秘密ヘッダを付与する
 module "cloudfront" {
   source = "../../modules/cloudfront"
@@ -116,6 +133,8 @@ module "cloudfront" {
   # 証明書を検証するため、名前が一致しないと接続できない
   origin_domain_name         = module.alb.fqdn
   origin_verify_header_value = local.origin_verify_header_value
+
+  web_acl_arn = module.waf_cloudfront[0].web_acl_arn
 }
 
 # WAF。ALBの手前でリクエストの中身を検査する。

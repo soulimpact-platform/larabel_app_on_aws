@@ -111,6 +111,21 @@ resource "aws_cloudfront_distribution" "this" {
 
   aliases = [local.fqdn]
 
+  # 送信元IPで判定するルールはここで評価する。
+  # ALB側のWeb ACLからは閲覧者の実IPが見えないため
+  web_acl_id = var.web_acl_arn
+
+  dynamic "logging_config" {
+    for_each = var.cloudfront.access_logs_enabled ? [1] : []
+
+    content {
+      bucket = aws_s3_bucket.logs[0].bucket_domain_name
+      prefix = "cloudfront"
+      # クエリ文字列も記録する。検索条件つきURLの追跡に必要
+      include_cookies = false
+    }
+  }
+
   origin {
     origin_id   = "alb"
     domain_name = var.origin_domain_name
