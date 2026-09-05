@@ -80,22 +80,23 @@ waf = {
   allowed_ip_cidrs = ["200.200.200.200/32"]
 
   # IP制限を免除するパス。uri_pathを小文字化してから照合される。
-  # ドットは正規表現のメタ文字なのでエスケープする（^/favicon.ico$ だと
-  # /faviconXico にも一致してしまう）
+  # ドットは正規表現のメタ文字なのでエスケープする
   #
-  # 社外のパートナー管理者は任意のIPから接続するため、IPでは絞れない。
-  # /partner 配下にまとめたうえで配下ごと免除し、アクセス制御は
-  # アプリ側のミドルウェア（admin / partner-admin のみ）に委ねる。
-  public_path_regexes = [
-    # --- パートナー領域（社外の担当者が使う） ---
-    # ログイン・ログアウトも /partner 配下にあるため、この1行で足りる。
-    # 社内向けの /login と /logout はIP制限の対象のまま残す
-    "^/partner/",
+  # 2種類に分けているのは、免除の条件が違うため:
+  #   public_path_regexes      経路を問わず公開（外形監視など）
+  #   cloudfront_path_regexes  CloudFront経由（秘密ヘッダ一致）の場合のみ公開
 
-    # --- 静的アセット・動作確認 ---
-    "^/build/", # Viteのビルド成果物（CSS/JS）。これが無いと画面が崩れる
+  public_path_regexes = [
+    "^/status$", # 外形監視。CloudFrontも許可IPも経由せず到達する
     "^/favicon\\.ico$",
     "^/robots\\.txt$",
-    "^/status$", # 外形監視・動作確認用
+  ]
+
+  # 社外パートナーは任意のIPから接続するためIPでは絞れない。
+  # CloudFrontを経由したことを秘密ヘッダで確認したうえで免除する。
+  # ALBのリスナールールでも同じ判定をしており、二重に守っている
+  cloudfront_path_regexes = [
+    "^/partner/", # ログイン・プロフィール・フリーランス管理一式
+    "^/build/",   # Viteのビルド成果物。これが無いと画面が崩れる
   ]
 }

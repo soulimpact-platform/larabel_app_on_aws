@@ -114,7 +114,12 @@ module "waf" {
 
   project     = var.project
   environment = var.environment
-  waf         = var.waf
+
+  # 秘密ヘッダはSSM由来のためtfvarsではなくここで合成する。
+  # ALBのリスナールールと同じ値を参照するので、片方だけズレることはない
+  waf = merge(var.waf, {
+    origin_verify_header_value = local.origin_verify_header_value
+  })
 
   alb_arn = module.alb.arn
 }

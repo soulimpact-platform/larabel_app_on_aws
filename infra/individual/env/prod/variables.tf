@@ -73,6 +73,9 @@ variable "alb" {
     idle_timeout               = optional(number)
     enable_deletion_protection = optional(bool)
     ssl_policy                 = optional(string)
+    access_logs_enabled        = optional(bool)
+    access_logs_prefix         = optional(string)
+    access_logs_retention_days = optional(number)
   })
   default = {}
 }
@@ -122,6 +125,8 @@ variable "waf" {
     log_all_requests      = optional(bool)
     allowed_ip_cidrs      = optional(list(string))
     public_path_regexes   = optional(list(string))
+    # CloudFront経由でのみ免除するパス。秘密ヘッダは main.tf でSSMから渡す
+    cloudfront_path_regexes = optional(list(string))
   })
   default = {}
 }
