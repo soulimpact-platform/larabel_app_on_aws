@@ -42,3 +42,13 @@ module "github_oidc" {
   project     = var.project
   environment = var.environment
 }
+
+# アラート通知の分配点。メール購読の確認が一度きりで済むよう、
+# 破棄されうる individual ではなく common 側に置く。
+# 実際のアラーム定義は individual/modules/monitoring にある
+module "sns_alert_topic" {
+  source = "../../modules/sns_alert_topic"
+
+  project     = var.project
+  environment = var.environment
+}

@@ -23,6 +23,23 @@ output "target_group_arn" {
   value       = aws_lb_target_group.this.arn
 }
 
+###############################################################################
+# CloudWatchのディメンション用
+#
+# CloudWatchはARN全体ではなく arn_suffix でリソースを識別する。
+# 誤ってARNを渡してもapplyは通り、アラームが永久にINSUFFICIENT_DATAの
+# ままになるという気づきにくい壊れ方をするので注意。
+###############################################################################
+output "arn_suffix" {
+  description = "ALBのarn_suffix（CloudWatchの LoadBalancer ディメンション）"
+  value       = aws_lb.this.arn_suffix
+}
+
+output "target_group_arn_suffix" {
+  description = "TGのarn_suffix（CloudWatchの TargetGroup ディメンション）"
+  value       = aws_lb_target_group.this.arn_suffix
+}
+
 output "security_group_id" {
   description = "ALBのSG。ECSタスク側でこのSGからの通信のみを許可する"
   value       = aws_security_group.alb.id

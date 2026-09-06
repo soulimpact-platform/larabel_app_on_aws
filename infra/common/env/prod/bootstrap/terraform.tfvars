@@ -10,6 +10,13 @@ state_bucket_name = "larabel-app-terraform-state"
 #     --value 'base64:...' --type SecureString --overwrite
 app_key = "dummy"
 
+# CloudWatchアラートの通知先メールアドレス
+# 初期値はプレースホルダ。apply後に必ず実際のアドレスへ更新すること:
+#   aws ssm put-parameter --name /larabel-app/prod/monitoring/alert_email \
+#     --value 'you@example.com' --type String --overwrite
+# ※ SNSのトピックを作る前に更新しておくと、確認メールが1回で済む
+alert_email = "alerts@example.com"
+
 # DB認証情報（SSM Parameter Storeに保存）
 # 初期値はdummy。AWS ConsoleまたはCLIで直接SSMパラメータを更新してください
 db_credentials = {
@@ -17,3 +24,15 @@ db_credentials = {
   username = "dummy"
   password = "dummy"
 }
+
+# CloudFront→ALBの秘密ヘッダ。実値はapply後にCLIで上書きする:
+#   aws ssm put-parameter --name /larabel-app/prod/cloudfront/origin_verify \
+#     --value "$(openssl rand -base64 32)" --type SecureString --overwrite
+cloudfront_origin_verify = "dummy"
+
+# WAFのIP制限で許可する送信元。実値はapply後にCLIで上書きする:
+#   aws ssm put-parameter --name /larabel-app/prod/waf/allowed_ip_cidrs \
+#     --value "$(curl -s https://checkip.amazonaws.com)/32" --type String --overwrite
+#
+# 既定は誰にも一致しないCIDR。投入し忘れても「全員遮断」に倒れる
+waf_allowed_ip_cidrs = "200.200.200.200/32"

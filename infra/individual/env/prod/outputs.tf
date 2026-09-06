@@ -17,6 +17,14 @@ output "certificate_arn" {
 }
 
 ###############################################################################
+# 監視
+###############################################################################
+output "alarm_names" {
+  description = "作成したアラーム名（set-alarm-state での疎通テストに使う）"
+  value       = module.monitoring.alarm_names
+}
+
+###############################################################################
 # ECR / GitHub Actions
 ###############################################################################
 output "ecr_repository_urls" {
@@ -58,4 +66,45 @@ output "ecs_web_service_name" {
 output "ecs_log_group_name" {
   description = "実行ログが出るロググループ（確認用）"
   value       = module.ecs.log_group_name
+}
+
+###############################################################################
+# WAF
+###############################################################################
+output "waf_web_acl_name" {
+  description = "Web ACL名"
+  value       = module.waf.web_acl_name
+}
+
+output "waf_log_group_name" {
+  description = "WAFログのロググループ名"
+  value       = module.waf.log_group_name
+}
+
+output "waf_count_only" {
+  description = "COUNTモードで動作中か（trueの間はブロックしない）"
+  value       = module.waf.count_only
+}
+
+###############################################################################
+# CloudFront（パートナー向け）
+###############################################################################
+output "partner_url" {
+  description = "パートナー向けの公開URL"
+  value       = try(module.cloudfront[0].url, null)
+}
+
+output "cloudfront_distribution_id" {
+  description = "CloudFrontディストリビューションID"
+  value       = try(module.cloudfront[0].distribution_id, null)
+}
+
+output "cloudfront_web_acl_name" {
+  description = "CloudFront用Web ACL名（us-east-1）"
+  value       = try(module.waf_cloudfront[0].web_acl_name, null)
+}
+
+output "cloudfront_waf_log_group" {
+  description = "CloudFront用WAFログのロググループ名（us-east-1）"
+  value       = try(module.waf_cloudfront[0].log_group_name, null)
 }

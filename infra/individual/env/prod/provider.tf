@@ -20,3 +20,22 @@ provider "aws" {
     }
   }
 }
+
+###############################################################################
+# us-east-1 用のプロバイダ
+#
+# CloudFrontが使えるACM証明書はus-east-1のものだけ、という制約のために必要。
+# 用途はCloudFront関連のみで、他のリソースは既定のプロバイダで作る。
+###############################################################################
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+
+  default_tags {
+    tags = {
+      Project     = var.project
+      Environment = var.environment
+      ManagedBy   = "terraform"
+    }
+  }
+}

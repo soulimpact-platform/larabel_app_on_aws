@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\PartnerUser;
 use App\Models\User;
 
 return [
@@ -42,6 +43,14 @@ return [
             'driver' => 'session',
             'provider' => 'users',
         ],
+
+        // 社外パートナー担当者用。テーブルもモデルもwebとは完全に別。
+        // ガードが分かれるためセッションも独立し、社内アカウントで
+        // パートナー画面にログインすることは構造上できない
+        'partner' => [
+            'driver' => 'session',
+            'provider' => 'partner_users',
+        ],
     ],
 
     /*
@@ -65,6 +74,11 @@ return [
         'users' => [
             'driver' => 'eloquent',
             'model' => env('AUTH_MODEL', User::class),
+        ],
+
+        'partner_users' => [
+            'driver' => 'eloquent',
+            'model' => PartnerUser::class,
         ],
 
         // 'users' => [

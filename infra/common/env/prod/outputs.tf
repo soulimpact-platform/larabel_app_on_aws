@@ -51,6 +51,19 @@ output "github_oidc_provider_arn" {
 }
 
 ###############################################################################
+# 監視
+###############################################################################
+output "alert_topic_arn" {
+  description = "アラート通知先のSNSトピックARN（individual側のアラームが参照する）"
+  value       = module.sns_alert_topic.arn
+}
+
+output "alert_subscription_arn" {
+  description = "メール購読の状態。PendingConfirmation なら確認メール未クリック"
+  value       = module.sns_alert_topic.subscription_arn
+}
+
+###############################################################################
 # Bastion
 ###############################################################################
 output "bastion_public_ip" {

@@ -58,26 +58,101 @@ graph TB
     Priv2 -->|"Route: 0.0.0.0/0 via NAT (cross-AZ)"| NAT1
 ```
 
-## 配信アーキテクチャ案
+## 配信アーキテクチャ
 
-- CloudFrontをエントリポイントとし、WAF（Web ACL）をアタッチしてリクエストをフィルタリング
-- 静的アセット（画像・CSS/JS等）はS3から配信
-- 動的リクエストはALB経由でECS(Fargate)上のLaravelアプリ（nginx + php-fpm）へ
+エントリポイントは **2つ**ある。社内は ALB を直接叩き、社外パートナーは
+CloudFront を経由する。CloudFront を通ったことは秘密ヘッダで証明する。
 
 ```mermaid
 graph LR
-    User((User)) -->|HTTPS| CF
+    Admin(("社内担当者<br/>許可IPのみ"))
+    Partner(("社外パートナー<br/>任意のIP"))
 
-    subgraph Edge["CloudFront Distribution"]
-        CF[CloudFront]
-        WAF["WAF (Web ACL)"]
-        WAF -.attached.-> CF
+    Admin -->|"alb-larabel.sukunahikona.org<br/>/admin/*"| ALB
+    Partner -->|"partner-admin.sukunahikona.org<br/>/partner/*"| CF
+
+    CF["CloudFront<br/>キャッシュ無効<br/>X-Origin-Verify を付与"]
+    CF -->|HTTPS| ALB
+
+    subgraph AWS["ap-northeast-1"]
+        ALB["ALB<br/>WAF をアタッチ<br/>リスナールールでヘッダ検証"]
+        ALB --> ECS["ECS Fargate<br/>nginx + php-fpm"]
+        ECS --> RDS[("RDS MySQL")]
     end
 
-    CF -->|"Static Assets (/css, /js, /images 等)"| S3[(S3 Bucket)]
-    CF -->|"Dynamic Requests"| ALB[ALB]
-    ALB --> ECS["ECS Fargate<br/>Laravel (nginx + php-fpm)"]
+    SSM[("SSM Parameter Store<br/>origin_verify")] -.->|同じ秘密値| CF
+    SSM -.-> ALB
 ```
+
+静的アセット（CSS/JS）は S3 ではなく **ECS 上の nginx が配信**している。
+Vite のビルド成果物をコンテナイメージに含めているため。
+
+### リクエストが通る順序
+
+```mermaid
+flowchart TD
+    Req["リクエスト到達"] --> WAF{"WAF: 許可IPか<br/>または公開パスか"}
+
+    WAF -->|いいえ| Block403["403<br/>WAFが遮断"]
+    WAF -->|はい| R10{"優先度10<br/>/partner/* かつ<br/>ヘッダ一致"}
+
+    R10 -->|一致| Fwd["ECSへ転送"]
+    R10 -->|不一致| R20{"優先度20<br/>/partner/*"}
+
+    R20 -->|一致| Deny1["403<br/>ALB直叩きを拒否"]
+    R20 -->|不一致| R30{"優先度30<br/>ヘッダ一致"}
+
+    R30 -->|一致| Deny2["403<br/>CF経由での<br/>社内領域迂回を拒否"]
+    R30 -->|不一致| Fwd
+```
+
+**WAF は送信元IP、リスナールールは経路**を見る。軸が違うため、
+どちらかが破られてももう一方が残る。
+
+### Web ACL の構成（REGIONAL / ALB にアタッチ）
+
+| 優先度 | ルール | アクション | 条件 |
+| --- | --- | --- | --- |
+| 0 | `mark-public-path` | `count`（非終端） | パスが正規表現セットに一致 → ラベル付与 |
+| 1 | `ip-restriction` | **`block`**（終端） | 許可IPでない **かつ** ラベル無し |
+| 10-14 | AWSマネージドルール5種 | `count` | Common / KnownBadInputs / SQLi / PHP / IpReputation |
+| 100 | `rate-limit` | `count` | 2000req / 5分 / IP |
+| 既定 | — | `allow` | — |
+
+`block` だけが終端するため、優先度1を通過したものだけがマネージドルールで検査される。
+マネージドルールは誤検知の洗い出し中のため **COUNT モード**（遮断しない）。
+
+免除パス（`public_path_regexes`）は次の5つ。**列挙したもの以外はすべてIP制限の対象**という
+「既定は守る」設計にしてある。新しい画面を追加しても自動的に保護される。
+
+```
+^/partner/   ^/build/   ^/status$   ^/favicon\.ico$   ^/robots\.txt$
+```
+
+### 認証の分離
+
+社内と社外はテーブルもガードも分けている。
+社内アカウントは `partner_users` に存在しないため、パートナー用ログインに
+入力しても**普通に認証失敗する**。ロールを見て弾く特別な処理は不要。
+
+```mermaid
+graph TB
+    subgraph Web["web ガード"]
+        Users[("users")] --> AdminScreens["/admin/*<br/>全機能"]
+    end
+
+    subgraph PartnerGuard["partner ガード"]
+        PU[("partner_users")] --> PartnerScreens["/partner/*"]
+        PC[("partner_companies")] -.-> PU
+    end
+
+    FL[("freelancers")]
+    AdminScreens -->|全社ぶん| FL
+    PartnerScreens -->|"自社ぶんのみ<br/>partner_company_id で絞る"| FL
+```
+
+`freelancers.partner_company_id` が `NULL` のものは「社内が直接登録した人材」で、
+どのパートナーからも見えない。
 
 ## CI/CD の認証（GitHub Actions ⇄ AWS の OIDC 連携）
 
@@ -379,11 +454,146 @@ individual が依存しているため、**削除・改名するとindividualの
 # 1. stateバケットとSSMパラメータ（初回のみ）
 cd infra/common/env/prod/bootstrap && terraform apply
 
-# 2. VPC / 踏み台 / RDS / OIDCプロバイダ
+# 2. VPC / 踏み台 / RDS / OIDCプロバイダ / SNSトピック
 cd infra/common/env/prod && terraform apply
 
-# 3. ECR / ECS / AssumeRole用ロール
+# 3. ECR / ALB / ECS / WAF / CloudFront / アラーム
 cd infra/individual/env/prod && terraform apply
+```
+
+`individual` は `common` の state を `terraform_remote_state` で参照しているため、
+**順序を逆にすると `vpc_id` などが解決できず plan 自体が失敗する**。
+
+## 再構築手順（destroy したあとに戻す）
+
+`individual` は検証のたびに destroy している。`common` ごと消した場合は
+以下をすべて実施しないと、**アプリは起動するがアラートが飛ばない/
+秘密ヘッダが `dummy` のまま、といった中途半端な状態になる。**
+
+### 1. インフラを順に apply
+
+```bash
+cd infra/common/env/prod/bootstrap && terraform apply   # bootstrapを消した場合のみ
+cd infra/common/env/prod           && terraform apply
+cd infra/individual/env/prod       && terraform apply
+```
+
+### 2. SSM に実値を投入する（bootstrap を作り直した場合）
+
+`ssm_parameter` モジュールは `lifecycle { ignore_changes = [value] }` を持つため、
+**Terraform は器だけを作り、中身はダミー値のまま**になる。
+パブリックリポジトリなので実値はコードに置かず、CLI で投入する。
+
+```bash
+REGION=ap-northeast-1
+PREFIX=/larabel-app/prod
+
+# Laravelのアプリケーションキー（セッション・暗号化に使う）
+aws ssm put-parameter --region $REGION --name $PREFIX/app/app_key \
+  --value "$(docker compose -f app/docker-compose.yml exec -T -u www-data php \
+             php artisan key:generate --show)" \
+  --type SecureString --overwrite
+
+# RDSのパスワード
+aws ssm put-parameter --region $REGION --name $PREFIX/rds/password \
+  --value "$(openssl rand -base64 24)" --type SecureString --overwrite
+
+# CloudWatchアラートの通知先
+aws ssm put-parameter --region $REGION --name $PREFIX/monitoring/alert_email \
+  --value 'you@example.com' --type String --overwrite
+
+# CloudFront → ALB の秘密ヘッダ
+aws ssm put-parameter --region $REGION --name $PREFIX/cloudfront/origin_verify \
+  --value "$(openssl rand -base64 32)" --type SecureString --overwrite
+
+```
+
+投入後に `individual` を再 apply すると、CloudFront と ALB のリスナールールに
+新しい秘密ヘッダが反映される。
+
+| パラメータ | 型 | 投入し忘れるとどうなるか |
+| --- | --- | --- |
+| `app/app_key` | SecureString | アプリが起動しない |
+| `rds/db_name` | String | **変更するとRDSが再作成される**（ForceNew） |
+| `rds/username` | String | 同上 |
+| `rds/password` | SecureString | DB接続に失敗する |
+| `monitoring/alert_email` | String | アラートの宛先が不正でメールが届かない |
+| `cloudfront/origin_verify` | SecureString | 秘密ヘッダが `dummy` になり、推測されうる |
+
+### 3. SNSの購読確認メールをクリックする
+
+`aws_sns_topic_subscription` は作成時に `PendingConfirmation` 状態になり、
+**Terraform では確認できない**。メール本文のリンクを踏むまで通知は一切届かない。
+未確認のまま3日経つと購読自体が自動削除される。
+
+```bash
+aws sns list-subscriptions-by-topic --region ap-northeast-1 \
+  --topic-arn "$(cd infra/common/env/prod && terraform output -raw alert_topic_arn)" \
+  --query 'Subscriptions[].{Endpoint:Endpoint,Arn:SubscriptionArn}' --output table
+```
+
+`SubscriptionArn` が `PendingConfirmation` ならメールを確認する。
+
+### 4. GitHub Secrets に初期管理者の認証情報を登録する
+
+`create_admin` ジョブが参照する。SSMではなくリポジトリのSecretsに置くのは、
+この機能のためだけに Terraform apply を2回走らせるのを避けるため。
+パブリックリポジトリでもSecretsは非公開で、ログにも自動でマスクされる。
+
+```bash
+gh secret set INITIAL_ADMIN_EMAIL --body 'owner@example.com'
+gh secret set INITIAL_ADMIN_NAME  --body '管理者'
+
+# パスワードは12文字以上。生成した値は手元に控えること
+# （Secretsは書き込み専用で、登録後に読み出せない）
+PW=$(openssl rand -base64 24); echo "$PW"
+gh secret set INITIAL_ADMIN_PASSWORD --body "$PW"
+```
+
+ブラウザからは Settings > Secrets and variables > Actions で登録する。
+
+値は `run-task` の `--overrides` で環境変数としてコンテナへ渡る。
+タスク定義にもリポジトリにも平文が現れない。
+
+### 5. CI を `run_migrate` と `create_admin` にチェックを入れて実行する
+
+`individual` を作り直すと **ECR が空・RDS も空**になる。
+`run_migrate` を付けずに実行するとイメージは push されるがマイグレーションが走らず、
+タスクが起動できずに `healthy-host` アラームが鳴る。
+
+`create_admin` は初期の社内管理者を1件作る。
+**本番の migrate タスクは `--seed` を実行しない**ため、`DatabaseSeeder` が作る
+`admin@example.com` / `password` は本番に存在しない。既知の認証情報を公開環境へ
+置かないための意図的な設計。
+
+代わりに `php artisan app:create-admin-user` を CI から一度だけ実行する。
+認証情報は SSM の `app/admin_*` から ECS タスクの secrets 経由で注入されるため、
+**ワークフローにもタスク定義にも平文が現れない**。コマンドは冪等なので
+再実行しても新規作成はしない。
+
+migrate と同じタスク定義を `run-task --overrides` でコマンドだけ差し替えて流用している。
+承認ゲートも migrate と同じ `app-prod-migrate` 環境を通る。
+
+以降のアカウント（社内ユーザー・パートナー企業・担当者）は、
+**ここで作った管理者が画面から発行する**。CI を再実行する必要はない。
+
+```
+/admin/users                       社内ユーザーの追加
+/admin/partner-companies           パートナー企業の追加
+/admin/partner-companies/{id}/edit 担当者アカウントの発行（先方へ渡す）
+```
+
+### 6. 動作確認
+
+```bash
+# 社内向け（許可IPから）
+curl -o /dev/null -w '%{http_code}\n' https://alb-larabel.sukunahikona.org/admin/login
+
+# パートナー向け（CloudFront経由）
+curl -o /dev/null -w '%{http_code}\n' https://partner-admin.sukunahikona.org/partner/login
+
+# ALB直叩きでのパートナー領域は403になること
+curl -o /dev/null -w '%{http_code}\n' https://alb-larabel.sukunahikona.org/partner/login
 ```
 
 ## 現状
@@ -394,17 +604,23 @@ cd infra/individual/env/prod && terraform apply
 | 踏み台 EC2 | 構築済み |
 | RDS for MySQL | 構築済み（単一AZ / リードレプリカなし） |
 | ECR / GitHub Actions OIDC | 構築済み・CI から push 実績あり |
-| ECS（migrate タスク） | 構築済み・migrate 実行済み |
-| ECS（Web サービス） | 未着手 |
-| ALB / CloudFront / WAF | 未着手 |
+| ECS（migrate / Web） | 構築済み |
+| ALB / ACM / Route53 | 構築済み |
+| WAF（REGIONAL） | 構築済み・**マネージドルールはCOUNTモード** |
+| CloudWatch アラーム（ALB 3本）+ SNS | 構築済み・通知実績あり |
+| CloudFront（パートナー向け） | コード実装済み・未適用 |
+| RDS / ECS のアラーム | 未着手 |
+| WAF（CLOUDFRONT スコープ） | 未着手 |
 
 ### 次にやること
 
-- **`APP_KEY` を SSM に追加**する。migrate では不要だが Web アプリの起動には必須。
-  `bootstrap` の `ssm_parameter` に追加し、`php artisan key:generate --show` の値を設定する
-- Web 用の ECS サービス、ALB、CloudFront、WAF
-- deploy ジョブ追加時に migrate の承認フローを再検討する。
-  却下が「失敗」扱いのため、現状のままでは deploy も止まる
+- WAF のマネージドルールを COUNT から BLOCK へ切り替える（誤検知の洗い出し後）
+- RDS のアラーム（`FreeStorageSpace` / `CPUCreditBalance` / `DatabaseConnections`）を
+  **`common` 側**に追加する。RDS 本体が `common` にあるため、`individual` に置くと
+  destroy のたびに監視が消える
+- EventBridge で ECS タスクの起動失敗（`CannotPullContainerError` など）と
+  ACM 証明書の期限接近を検知する
+- CI にテストジョブを追加する（現在 PHPUnit が一度も実行されていない）
 
 ### 既知の課題
 
@@ -416,3 +632,11 @@ cd infra/individual/env/prod && terraform apply
   **これらを変更するとインスタンスが再作成される**（`ForceNew`）ため、データが消える。
   パスワードは write-only 引数のため安全で、`password_version` を増やすだけで反映される
 - migrate は `--isolated` を付けていない。`cache_locks` テーブルができたので付与可能
+- WAF の `x-origin-verify` は `redacted_fields` でマスクしているが、
+  **他のカスタムヘッダを増やす場合も同様の考慮が要る**。WAFログは
+  `httpRequest.headers` をそのまま記録するため、秘密値が平文で残る
+- CloudFront 配下では ALB 側 WAF のレートベース制限と IP レピュテーションが
+  機能しなくなる（送信元が CloudFront の IP に見えるため）。
+  必要なら us-east-1 に `scope = "CLOUDFRONT"` の Web ACL を別途作る
+- `individual` の destroy で ACM 証明書が孤児として残ることがある。
+  過去に2枚（`sukunahikona.org` / `*.sukunahikona.org`）が失効まで放置された

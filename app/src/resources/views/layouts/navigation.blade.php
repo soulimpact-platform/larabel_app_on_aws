@@ -16,11 +16,17 @@
                         {{ __('Dashboard') }}
                     </x-nav-link>
 
-                    @if (Auth::user()->isAdmin())
+                        <x-nav-link :href="route('freelancers.index')" :active="request()->routeIs('freelancers.*')">
+                            {{ __('フリーランス管理') }}
+                        </x-nav-link>
+
+                        <x-nav-link :href="route('partner-companies.index')" :active="request()->routeIs('partner-companies.*') || request()->routeIs('partner-users.*')">
+                            {{ __('パートナー企業') }}
+                        </x-nav-link>
+
                         <x-nav-link :href="route('users.index')" :active="request()->routeIs('users.*')">
                             {{ __('User Management') }}
                         </x-nav-link>
-                    @endif
                 </div>
             </div>
 
@@ -77,11 +83,17 @@
                 {{ __('Dashboard') }}
             </x-responsive-nav-link>
 
-            @if (Auth::user()->isAdmin())
+                <x-responsive-nav-link :href="route('freelancers.index')" :active="request()->routeIs('freelancers.*')">
+                    {{ __('フリーランス管理') }}
+                </x-responsive-nav-link>
+
+                <x-responsive-nav-link :href="route('partner-companies.index')" :active="request()->routeIs('partner-companies.*')">
+                    {{ __('パートナー企業') }}
+                </x-responsive-nav-link>
+
                 <x-responsive-nav-link :href="route('users.index')" :active="request()->routeIs('users.*')">
                     {{ __('User Management') }}
                 </x-responsive-nav-link>
-            @endif
         </div>
 
         <!-- Responsive Settings Options -->

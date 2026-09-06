@@ -30,14 +30,6 @@
                         <x-input-error :messages="$errors->get('password')" class="mt-2" />
                     </div>
 
-                    <div class="mt-4">
-                        <x-input-label for="role" :value="__('Role')" />
-                        <select id="role" name="role" class="mt-1 block w-full border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 rounded-md shadow-sm">
-                            <option value="member" @selected(old('role', $user->role) === 'member')>member</option>
-                            <option value="admin" @selected(old('role', $user->role) === 'admin')>admin</option>
-                        </select>
-                        <x-input-error :messages="$errors->get('role')" class="mt-2" />
-                    </div>
 
                     <div class="flex items-center justify-end mt-6 space-x-4">
                         <a href="{{ route('users.index') }}" class="text-sm text-gray-600 hover:text-gray-900">{{ __('Cancel') }}</a>
